@@ -33,9 +33,11 @@ jobs:
 
       - name: Package Lambda source
         run: |
-          # Lambda コードディレクトリに移動して ZIP 作成
-          cd src/handlers
-          zip -r ../../../lambda_package.zip ./*
+          rm -rf build
+          mkdir -p build
+          cp -R src/. build/
+          cd build
+          zip -r ../lambda_package.zip .
 
       - name: Deploy Lambda
         run: |
