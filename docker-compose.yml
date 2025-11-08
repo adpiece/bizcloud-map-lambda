@@ -1,0 +1,13 @@
+version: "3.13"
+
+services:
+  lambda:
+    build:
+      context: .
+      dockerfile: Dockerfile.sample
+    env_file: .env
+    volumes:
+      - .:/var/task
+    entrypoint: >
+      sh -c "python -c 'from handlers.hello import lambda_handler; print(lambda_handler({}, None))'"
+

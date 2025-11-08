@@ -67,6 +67,8 @@ ENV/
 env.bak/
 venv.bak/
 
+vendor/
+
 .spyderproject
 .spyproject
 

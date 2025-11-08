@@ -1,0 +1,23 @@
+# Lambdaと同じPython 3.10ランタイムを使ってローカル検証するためのサンプルDockerfile
+FROM public.ecr.aws/lambda/python:3.10
+
+WORKDIR /var/task
+
+# 依存ライブラリを Lambda と同じ構成で vendor ディレクトリへ展開
+COPY requirements.txt .
+RUN mkdir -p vendor \
+  && python -m pip install --upgrade pip \
+  && pip install --no-cache-dir -r requirements.txt -t vendor
+
+# Lambdaハンドラーを含むソース一式を配置
+COPY src ./src
+
+# vendor を import パスに追加
+ENV PYTHONPATH="/var/task/src:/var/task/vendor"
+
+# ローカル実行時はイベントを標準入力から渡す
+# 例)  echo '{}' | docker run --rm -i --env-file .env bizcloud-lambda-sample
+ENV ENV_FILE=.env
+
+CMD ["/bin/sh", "-c", "if [ -f \"$ENV_FILE\" ]; then set -a && . \"$ENV_FILE\" && set +a; fi && python -m awslambdaric handlers.hello.lambda_handler"]
+
