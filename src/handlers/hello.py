@@ -1,8 +1,13 @@
 import json
 import os
+import sys
 from typing import Any, Dict
 
-import pg8000
+VENDOR_PATH = os.path.join(os.path.dirname(__file__), "..", "vendor")
+if VENDOR_PATH not in sys.path:
+  sys.path.append(VENDOR_PATH)
+
+import pg8000  # noqa: E402
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
