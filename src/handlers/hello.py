@@ -3,9 +3,7 @@ import os
 import sys
 from typing import Any, Dict
 
-VENDOR_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "vendor")
-)
+VENDOR_PATH = os.path.join(os.path.dirname(__file__), "..", "vendor")
 if VENDOR_PATH not in sys.path:
   sys.path.append(VENDOR_PATH)
 
