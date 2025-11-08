@@ -1,12 +1,24 @@
 # bizcloud-map-lambda
 
-## ローカル実行メモ
+## 事前準備
 
-1. 依存ライブラリをローカルの `vendor/` にインストール  
-   ```bash
-   pip install -r requirements.txt -t vendor
-   ```
-2. `.env` を用意（`env.sample` からコピー）
-3. `docker compose run --rm lambda`
+bizcloud-map-apiのDBへ接続をするため"docker-compose up -d"で起動しておく必要があります。
 
-※ `vendor/` が存在しないとコンテナから `pg8000` などを読み込めません。
+### 環境変数の設定
+.envファイルを作成して、以下の環境変数を設定してください。
+
+```bash
+cp env.sample .env
+```
+
+## 開発環境
+```bash
+docker-compose build
+```
+
+```bash
+docker compose run --rm lambda
+```
+
+実行する関数は"docker-compose.yml"に記載されている
+entrypointで指定されているので、実行関数に合わせファイル名を変更してください。
