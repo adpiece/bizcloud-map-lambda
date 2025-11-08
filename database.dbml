@@ -1,0 +1,168 @@
+Project BizCloudMap {
+  database_type: 'PostgreSQL'
+}
+Enum status_enum {
+  active [note: 'アクティブ']
+  inactive [note: '非アクティブ']
+  archived [note: 'アーカイブ']
+}
+Enum upload_status_enum {
+  uploading [note: '生成中']
+  success [note: '成功']
+  error [note: 'エラー']
+}
+Table users {
+  id int [pk, increment, note: 'ユーザーID']
+  provider varchar [not null, default: 'email', note: 'プロバイダー']
+  uid varchar [not null, default: '', note: 'UID']
+  email varchar [not null, unique, note: 'メールアドレス']
+  encrypted_password varchar [not null, default: '', note: '暗号化パスワード']
+  reset_password_token varchar [unique, note: 'パスワードリセットトークン']
+  reset_password_sent_at datetime [note: 'パスワードリセット送信日時']
+  allow_password_change boolean [default: false, note: 'パスワード変更許可']
+  remember_created_at datetime [note: 'ログイン記憶作成日時']
+  confirmation_token varchar [unique, note: '確認トークン']
+  confirmed_at datetime [note: '確認日時']
+  confirmation_sent_at datetime [note: '確認送信日時']
+  unconfirmed_email varchar [note: '未確認メールアドレス']
+  name varchar [note: 'ユーザー名']
+  tokens json [note: '認証トークン（JSON形式）']
+  created_at timestamp [not null, note: '作成日時']
+  updated_at timestamp [not null, note: '更新日時']
+  note: "ユーザー情報を管理するテーブル（devise token auth対応）"
+}
+Table product {
+  id int [pk, increment, note: '商品ID']
+  category_id int [ref: > categories.id, note: 'カテゴリID']
+  manufacturer_id int [ref: > manufacturers.id, note: 'メーカーID']
+  product_name varchar [not null, note: '品名']
+  product_code varchar [not null, unique, note: '品番']
+  alias varchar [note: '別名']
+  list_price int [note: '定価（円）']
+  list_price_updater varchar [note: '定価最終更新者']
+  list_price_updated_at timestamp [note: '定価最終更新日時']
+  purchase_price int [note: '仕入れ価格（円）']
+  purchase_price_updater varchar [note: '仕入れ価格最終更新者']
+  purchase_price_updated_at timestamp [note: '仕入れ価格最終更新日時']
+  selling_price int [note: '販売価格（円）']
+  selling_price_updater varchar [note: '販売価格最終更新者']
+  selling_price_updated_at timestamp [note: '販売価格最終更新日時']
+  selling_price_memo text [note: '販売価格メモ']
+  catalog_url varchar [note: 'カタログURL']
+  manual_url varchar [note: '取扱説明書URL']
+  remarks text [note: '備考']
+  memo text [note: 'メモ']
+  redirect_qr_code varchar [note: 'QRコード遷移先URL']
+  stock_quantity int [note: '在庫数']
+  storage_location varchar [note: '保管場所']
+  inventory_check boolean [default: false, note: '棚卸し']
+  product_admin_name varchar [note: '管理者名']
+  updater_name varchar [note: '更新者名']
+  created_at timestamp [not null, default: `now()`, note: '作成日時']
+  updated_at timestamp [not null, default: `now()`, note: '更新日時']
+  indexes {
+    product_code [unique, note: '品番のユニークインデックス']
+    product_name [note: '品名検索用インデックス']
+    product_code [type: 'gin', opclass: 'gin_trgm_ops', note: '品番のGINインデックス（前方一致検索用）']
+    product_name [type: 'gin', opclass: 'gin_trgm_ops', note: '品名のGINインデックス（前方一致検索用）']
+  }
+  note: "商品情報を管理するテーブル（カテゴリ・メーカーとのリレーション）。ファイルはActive Storageで管理（icon_image, stock_image, item1_file, item2_file, item3_file）"
+}
+Table categories {
+  id int [pk, increment, note: 'カテゴリID']
+  name varchar [not null, unique, note: 'カテゴリ名']
+  code varchar [unique, note: 'コード']
+  label_color varchar [note: 'ラベルカラー']
+  status status_enum [default: 'active', note: 'ステータス']
+  remarks text [note: '備考']
+  created_at timestamp [not null, default: `now()`, note: '作成日時']
+  updated_at timestamp [not null, default: `now()`, note: '更新日時']
+  note: "カテゴリ情報を管理するテーブル"
+}
+Table manufacturers {
+  id int [pk, increment, note: 'メーカーID']
+  name varchar [not null, unique, note: 'メーカー名']
+  code varchar [unique, note: 'コード']
+  status status_enum [default: 'active', note: 'ステータス']
+  remarks text [note: '備考']
+  created_at timestamp [not null, default: `now()`, note: '作成日時']
+  updated_at timestamp [not null, default: `now()`, note: '更新日時']
+  note: "メーカー情報を管理するテーブル"
+}
+Table exported_files {
+  id bigint [pk, increment, note: 'ID']
+  file_type varchar [not null, note: 'ファイルタイプ（Product, Category, Manufacturerなど）']
+  file_name varchar [not null, note: 'ファイル名']
+  s3_url varchar [not null, note: 'S3URL']
+  record_count int [not null, default: 0, note: 'レコード数']
+  upload_status upload_status_enum [not null, default: 'uploading', note: 'アップロードステータス']
+  record_ids jsonb [not null, default: '[]', note: 'エクスポートされたレコードIDの配列']
+  created_at timestamp [not null, note: '作成日時']
+  updated_at timestamp [not null, note: '更新日時']
+  indexes {
+    record_ids [type: 'gin', note: 'JSONB検索用GINインデックス']
+  }
+  note: "エクスポートファイル情報を管理するテーブル。record_idsにはエクスポート対象のレコードIDを配列で保存（例: [1, 3, 5, 7]）"
+}
+Table roles {
+  id int [pk, increment, note: 'ロールID']
+  name varchar [not null, note: 'ロール名']
+  resource_type varchar [note: 'リソースタイプ（ポリモーフィック関連）']
+  resource_id int [note: 'リソースID（ポリモーフィック関連）']
+  created_at timestamp [not null, note: '作成日時']
+  updated_at timestamp [not null, note: '更新日時']
+  indexes {
+    (name, resource_type, resource_id) [unique]
+  }
+  note: "ロール情報を管理するテーブル（Rolify）"
+}
+Table users_roles {
+  user_id int [ref: > users.id, note: 'ユーザーID']
+  role_id int [ref: > roles.id, note: 'ロールID']
+  indexes {
+    (user_id, role_id)
+  }
+  note: "ユーザーとロールの中間テーブル（Rolify、主キーなし）"
+}
+
+// Active Storage テーブル
+Table active_storage_blobs {
+  id bigint [pk, increment, note: 'BLOB ID']
+  key varchar [not null, unique, note: 'ファイルキー']
+  filename varchar [not null, note: 'ファイル名']
+  content_type varchar [note: 'MIMEタイプ']
+  metadata text [note: 'メタデータ（JSON形式）']
+  service_name varchar [not null, note: 'サービス名（local, s3など）']
+  byte_size bigint [not null, note: 'ファイルサイズ（バイト）']
+  checksum varchar [note: 'チェックサム']
+  created_at timestamp [not null, note: '作成日時']
+  indexes {
+    key [unique]
+  }
+  note: "Active Storageのファイル情報を管理するテーブル"
+}
+
+Table active_storage_attachments {
+  id bigint [pk, increment, note: 'アタッチメントID']
+  name varchar [not null, note: 'アタッチメント名（icon_image, stock_image, item1_file, item2_file, item3_file）']
+  record_type varchar [not null, note: 'レコードタイプ（Productなど）']
+  record_id bigint [not null, note: 'レコードID（ProductのIDなど）']
+  blob_id bigint [ref: > active_storage_blobs.id, not null, note: 'BLOB ID']
+  created_at timestamp [not null, note: '作成日時']
+  indexes {
+    (record_type, record_id, name)
+    blob_id
+  }
+  note: "Active Storageのファイルとレコードの関連を管理するテーブル。Productテーブルのファイル（icon_image, stock_image, item1_file, item2_file, item3_file）を管理"
+}
+
+Table active_storage_variant_records {
+  id bigint [pk, increment, note: 'バリアントID']
+  blob_id bigint [ref: > active_storage_blobs.id, not null, note: 'BLOB ID']
+  variation_digest varchar [not null, note: 'バリアントダイジェスト']
+  indexes {
+    blob_id
+    variation_digest
+  }
+  note: "Active Storageの画像バリアント（リサイズなど）を管理するテーブル"
+}
