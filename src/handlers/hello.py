@@ -2,8 +2,7 @@ import json
 import os
 from typing import Any, Dict
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import pg8000
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -16,23 +15,29 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
   db_password = os.environ["DB_PASSWORD"]
 
   try:
-    with psycopg2.connect(
+    conn = pg8000.connect(
         host=db_host,
         port=db_port,
-        dbname=db_name,
+        database=db_name,
         user=db_user,
         password=db_password,
-        connect_timeout=5,
-    ) as conn, conn.cursor(cursor_factory=RealDictCursor) as cursor:
-      cursor.execute("SELECT * FROM users ORDER BY id ASC LIMIT 1;")
-      row = cursor.fetchone()
+        timeout=5,
+    )
+    try:
+      with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM users ORDER BY id ASC LIMIT 1;")
+        columns = [col[0] for col in cursor.description] if cursor.description else []
+        row = cursor.fetchone()
+        record = dict(zip(columns, row)) if row and columns else None
 
       body = {
           "message": "success",
-          "record": row,
+          "record": record,
       }
+    finally:
+      conn.close()
 
-  except psycopg2.Error as exc:
+  except pg8000.Error as exc:
     body = {
         "message": "database_error",
         "error": str(exc),
