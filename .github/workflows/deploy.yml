@@ -1,0 +1,45 @@
+name: AWS Lambda Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions
+
+      - name: Verify AWS role
+        run: aws sts get-caller-identity
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Package Lambda source
+        run: |
+          # Lambda コードディレクトリに移動して ZIP 作成
+          cd src/handlers
+          zip -r ../../../lambda_package.zip ./*
+
+      - name: Deploy Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name bizCloudMapRdsTest \
+            --zip-file fileb://lambda_package.zip \
+            --publish
