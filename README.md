@@ -16,8 +16,15 @@ cp env.sample .env
 docker-compose build
 ```
 
+依存ライブラリをインストールする
 ```bash
-docker compose run --rm lambda
+docker compose run --rm --entrypoint /bin/sh lambda -c "\
+  python -m pip install --upgrade pip && \
+  pip install --no-cache-dir -r requirements.txt -t vendor"
+```
+
+```bash
+docker compose run --rm -it lambda
 ```
 
 実行する関数は"docker-compose.yml"に記載されている

@@ -6,8 +6,15 @@ services:
       context: .
       dockerfile: Dockerfile.sample
     env_file: .env
+    environment:
+      USE_LOCAL_S3: "true"
+      LOCAL_S3_DIR: "/var/task/.local_s3"
+      LOCAL_S3_BASE_URL: "http://localhost/local-s3"
     volumes:
       - .:/var/task
-    entrypoint: >
-      sh -c "python -c 'from handlers.hello import lambda_handler; print(lambda_handler({}, None))'"
+    entrypoint:
+      - python
+      - -m
+      - debug.process_export_job_runner
 
+## 開発を行うhundlerに合わせ"debug.process_export_job_runner"変更してください
