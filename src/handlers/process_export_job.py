@@ -180,7 +180,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
       _upload_to_s3(csv_content, bucket, key)
       download_url = _generate_download_url(bucket, key, presigned_ttl)
-      breakpoint()
       _update_exported_file(exported_file_id, download_url)
 
       results.append(
