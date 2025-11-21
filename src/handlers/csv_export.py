@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List
 import boto3
 
 from db.postgres import DatabaseError, get_connection
-from export_config.headers import TABLE_EXPORT_CONFIG
+from config.csv_export.headers import TABLE_EXPORT_CONFIG
 
 S3_CLIENT = boto3.client("s3")
 
@@ -145,7 +145,7 @@ def _generate_download_url(bucket: str, key: str, expires_in: int) -> str:
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
   """
   SQSメッセージに基づいてCSVを生成し、S3に配置し、exported_files を更新する。
-  Parametersは"debug/process_export_job_runner.py"参照
+  Parametersは"debug/csv_export_runner.py"参照
   """
 
   default_bucket = os.environ["EXPORT_CSV_BUCKET"]

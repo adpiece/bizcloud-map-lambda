@@ -1,7 +1,7 @@
 import json
 import os
 
-from handlers.process_export_job import lambda_handler
+from handlers.csv_export import lambda_handler
 
 
 def main() -> None:
