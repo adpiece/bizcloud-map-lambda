@@ -50,10 +50,7 @@ jobs:
         run: |
           cp -R src/. build/
           cd build
-          find . -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null || true
-          find . -type f -name "*.pyc" -delete
-          find . -type f -name "*.pyo" -delete
-          zip -r ../lambda_package.zip . -x "*.pyc" -x "*.pyo" -x "*/__pycache__/*" -x "__pycache__/*"
+          zip -r ../lambda_package.zip .
 
       - name: Deploy Lambda
         run: |
