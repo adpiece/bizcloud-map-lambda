@@ -61,3 +61,10 @@ jobs:
             --function-name StgBizCloudMapCsvExport \
             --zip-file fileb://lambda_package.zip \
             --publish
+
+      - name: Deploy QR Export Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name StgBizCloudMapQrExport \
+            --zip-file fileb://lambda_package.zip \
+            --publish
