@@ -148,20 +148,39 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
   Parametersは"debug/csv_export_runner.py"参照
   """
 
-  default_bucket = os.environ["EXPORT_CSV_BUCKET"]
+  print("Lambda handler started")
+  
+  try:
+    default_bucket = os.environ["EXPORT_CSV_BUCKET"]
+    print(f"Bucket: {default_bucket}")
+  except KeyError:
+    print("ERROR: EXPORT_CSV_BUCKET environment variable is not set")
+    return {
+      "statusCode": 500,
+      "body": json.dumps({"error": "EXPORT_CSV_BUCKET environment variable is required"}),
+    }
+  
   presigned_ttl = 7 * 24 * 3600
   results = []
 
   for record in event.get("Records", []):
     try:
+      print("Processing record")
       payload = json.loads(record["body"])
+      print(f"Payload: {json.dumps(payload)}")
       file_type = payload["file_type"]
       record_ids = payload.get("record_ids", [])
       is_all_record = bool(payload.get("is_all_record", False))
       exported_file_id = int(payload["exported_file_id"])
       table = file_type.lower()
+      
+      print(f"Fetching records from table: {table}, record_ids: {record_ids}, is_all_record: {is_all_record}")
       rows = _fetch_records(table, record_ids, is_all_record)
+      print(f"Fetched {len(rows)} records")
+      
+      print("Generating CSV")
       csv_content = _to_csv(table, rows)
+      print(f"CSV content length: {len(csv_content)}")
 
       if not csv_content:
         results.append(
@@ -177,10 +196,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
       bucket = default_bucket
       key = _build_s3_key(file_type, exported_file_id)
+      print(f"Uploading to S3: {bucket}/{key}")
 
       _upload_to_s3(csv_content, bucket, key)
+      print("S3 upload completed")
+      
+      print("Generating download URL")
       download_url = _generate_download_url(bucket, key, presigned_ttl)
+      print(f"Download URL generated: {download_url}")
+      
+      print(f"Updating exported_file record: {exported_file_id}")
       _update_exported_file(exported_file_id, download_url)
+      print("Database update completed")
 
       results.append(
           {
@@ -192,6 +219,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       )
 
     except (KeyError, ValueError, json.JSONDecodeError) as exc:
+      print(f"ERROR: invalid_message: {exc}")
       results.append(
           {
               "file_type": None,
@@ -200,6 +228,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
           }
       )
     except DatabaseError as exc:
+      print(f"ERROR: database_error: {exc}")
       results.append(
           {
               "file_type": payload.get("file_type"),
@@ -208,6 +237,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
           }
       )
     except Exception as exc:
+      print(f"ERROR: unexpected_error: {exc}")
+      import traceback
+      print(f"Traceback: {traceback.format_exc()}")
       results.append(
           {
               "file_type": payload.get("file_type") if isinstance(payload, dict) else None,
