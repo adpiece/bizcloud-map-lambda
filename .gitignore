@@ -86,3 +86,4 @@ dmypy.json
 
 cython_debug/
 
+.local_s3/

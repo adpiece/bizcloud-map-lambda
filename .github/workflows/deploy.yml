@@ -54,3 +54,10 @@ jobs:
             --function-name bizCloudMapRdsTest \
             --zip-file fileb://lambda_package.zip \
             --publish
+
+      - name: Deploy CSV Export Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name StgBizCloudMapCsvExport \
+            --zip-file fileb://lambda_package.zip \
+            --publish
