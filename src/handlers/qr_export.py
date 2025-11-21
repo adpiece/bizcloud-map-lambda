@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
@@ -162,6 +163,8 @@ def _update_exported_file(record_id: int, download_url: str) -> None:
   exported_files テーブルを更新する。
   """
 
+  print(f"[DB Update] Updating exported_file: id={record_id}, url={download_url}")
+  
   query = """
       UPDATE exported_files
       SET s3_url = %s,
@@ -170,10 +173,17 @@ def _update_exported_file(record_id: int, download_url: str) -> None:
       WHERE id = %s
   """
 
-  with get_connection(timeout=5) as conn:
-    with conn.cursor() as cursor:
-      cursor.execute(query, (download_url, 2, record_id))
-      conn.commit()
+  try:
+    with get_connection(timeout=5) as conn:
+      with conn.cursor() as cursor:
+        cursor.execute(query, (download_url, 2, record_id))
+        rows_affected = cursor.rowcount
+        conn.commit()
+        print(f"[DB Update] Success: id={record_id}, rows_affected={rows_affected}")
+  except Exception as e:
+    print(f"[DB Update] Error: id={record_id}, error={str(e)}")
+    print(f"[DB Update] Traceback: {traceback.format_exc()}")
+    raise
 
 
 def _upload_to_s3(pdf_path: Path, bucket: str, key: str) -> None:
@@ -181,18 +191,27 @@ def _upload_to_s3(pdf_path: Path, bucket: str, key: str) -> None:
   PDF ファイルを S3 にアップロードする。
   """
 
+  print(f"[S3 Upload] Starting upload: bucket={bucket}, key={key}, file_size={pdf_path.stat().st_size} bytes")
+  
   if USE_LOCAL_S3:
     destination = LOCAL_S3_DIR / bucket / key
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(pdf_path.read_bytes())
+    print(f"[S3 Upload] Local S3 mode: File saved to {destination}")
     return
 
-  S3_CLIENT.put_object(
-      Bucket=bucket,
-      Key=key,
-      Body=pdf_path.read_bytes(),
-      ContentType="application/pdf",
-  )
+  try:
+    response = S3_CLIENT.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=pdf_path.read_bytes(),
+        ContentType="application/pdf",
+    )
+    print(f"[S3 Upload] Success: bucket={bucket}, key={key}, etag={response.get('ETag', 'N/A')}")
+  except Exception as e:
+    print(f"[S3 Upload] Error: bucket={bucket}, key={key}, error={str(e)}")
+    print(f"[S3 Upload] Traceback: {traceback.format_exc()}")
+    raise
 
 
 def _build_s3_key(table: str, exported_file_id: int) -> str:
@@ -241,11 +260,16 @@ def generate_qr_pdf(table: str, record_ids: List[int], is_all_record: bool) -> P
   """
 
   front_domain = os.environ["FRONT_DOMAIN"]
+  print(f"[PDF Generation] Front domain: {front_domain}")
 
+  print(f"[PDF Generation] Fetching IDs: table={table}, record_ids={record_ids}, is_all_record={is_all_record}")
   ids = _fetch_ids(table, record_ids, is_all_record)
+  print(f"[PDF Generation] Fetched {len(ids)} record IDs: {ids}")
+  
   if not ids:
     raise ValueError("QR を作成する対象レコードが存在しません。")
 
+  print(f"[PDF Generation] Generating QR images for {len(ids)} records")
   images: List[Dict[str, Any]] = []
   for record_id in ids:
     url = _build_qr_url(front_domain, record_id)
@@ -265,7 +289,9 @@ def generate_qr_pdf(table: str, record_ids: List[int], is_all_record: bool) -> P
   with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", prefix=f"{table}_qr_") as tmp_file:
     output_path = Path(tmp_file.name)
 
+  print(f"[PDF Generation] Creating PDF layout with {len(images)} QR codes")
   _layout_qrs_to_pdf(images, output_path)
+  print(f"[PDF Generation] PDF layout completed: {output_path}")
   return output_path
 
 
@@ -282,33 +308,53 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
   }
   """
 
+  print(f"[Lambda Handler] Event received: {json.dumps(event, default=str)}")
+  
   default_bucket = os.getenv("EXPORT_QR_BUCKET")
   if not default_bucket:
     if USE_LOCAL_S3:
       default_bucket = os.getenv("LOCAL_S3_BUCKET", "s3-bucket")
+      print(f"[Lambda Handler] Using local S3 bucket: {default_bucket}")
     else:
-      raise KeyError("EXPORT_QR_BUCKET environment variable is required")
+      error_msg = "EXPORT_QR_BUCKET environment variable is required"
+      print(f"[Lambda Handler] Error: {error_msg}")
+      raise KeyError(error_msg)
+  else:
+    print(f"[Lambda Handler] Using S3 bucket: {default_bucket}")
+
+  print(f"[Lambda Handler] USE_LOCAL_S3={USE_LOCAL_S3}")
 
   presigned_ttl = 7 * 24 * 3600
   results = []
 
   for record in event.get("Records", []):
     try:
+      print(f"[Lambda Handler] Processing record: {record}")
       payload = json.loads(record["body"])
       table = payload["table"]
       record_ids = payload.get("record_ids", [])
       is_all_record = bool(payload.get("is_all_record", False))
       exported_file_id = int(payload["exported_file_id"])
 
+      print(f"[Lambda Handler] Parameters: table={table}, record_ids={record_ids}, is_all_record={is_all_record}, exported_file_id={exported_file_id}")
+
+      print(f"[PDF Generation] Starting PDF generation for table={table}")
       output_path = generate_qr_pdf(table, record_ids, is_all_record)
+      print(f"[PDF Generation] PDF generated: path={output_path}, size={output_path.stat().st_size} bytes")
 
       try:
         bucket = default_bucket
         key = _build_s3_key(table, exported_file_id)
+        print(f"[S3] Prepared S3 location: bucket={bucket}, key={key}")
 
         _upload_to_s3(output_path, bucket, key)
+        print(f"[S3] Upload completed successfully")
+        
         download_url = _generate_download_url(bucket, key, presigned_ttl)
+        print(f"[S3] Generated download URL: {download_url}")
+        
         _update_exported_file(exported_file_id, download_url)
+        print(f"[DB] Database update completed successfully")
 
         results.append(
             {
@@ -318,39 +364,52 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "s3_url": download_url,
             }
         )
+        print(f"[Lambda Handler] Successfully processed exported_file_id={exported_file_id}")
       finally:
         # 一時ファイルを削除
         if output_path.exists():
           output_path.unlink(missing_ok=True)
+          print(f"[PDF Generation] Temporary file deleted: {output_path}")
 
     except (KeyError, ValueError, json.JSONDecodeError) as exc:
+      error_msg = f"invalid_message: {exc}"
+      print(f"[Lambda Handler] Error (invalid_message): {error_msg}")
+      print(f"[Lambda Handler] Traceback: {traceback.format_exc()}")
       results.append(
           {
               "table": None,
               "exported_file_id": None,
-              "error": f"invalid_message: {exc}",
+              "error": error_msg,
           }
       )
     except DatabaseError as exc:
-      results.append(
-          {
-              "table": payload.get("table"),
-              "exported_file_id": payload.get("exported_file_id"),
-              "error": f"database_error: {exc}",
-          }
-      )
-    except Exception as exc:
+      error_msg = f"database_error: {exc}"
+      print(f"[Lambda Handler] Error (database_error): {error_msg}")
+      print(f"[Lambda Handler] Traceback: {traceback.format_exc()}")
       results.append(
           {
               "table": payload.get("table") if isinstance(payload, dict) else None,
               "exported_file_id": payload.get("exported_file_id") if isinstance(payload, dict) else None,
-              "error": f"unexpected_error: {exc}",
+              "error": error_msg,
+          }
+      )
+    except Exception as exc:
+      error_msg = f"unexpected_error: {exc}"
+      print(f"[Lambda Handler] Error (unexpected_error): {error_msg}")
+      print(f"[Lambda Handler] Traceback: {traceback.format_exc()}")
+      results.append(
+          {
+              "table": payload.get("table") if isinstance(payload, dict) else None,
+              "exported_file_id": payload.get("exported_file_id") if isinstance(payload, dict) else None,
+              "error": error_msg,
           }
       )
 
-  return {
+  response = {
       "statusCode": 200,
       "body": json.dumps({"results": results}),
   }
+  print(f"[Lambda Handler] Returning response: {json.dumps(response, default=str)}")
+  return response
 
 
