@@ -40,16 +40,20 @@ jobs:
         if: ${{ hashFiles('requirements.txt') != '' }}
         run: |
           docker run --rm \
+            --entrypoint /bin/bash \
             -v "$PWD:/var/task" \
             -w /var/task \
             public.ecr.aws/lambda/python:3.13 \
-            /bin/bash -c "pip install --upgrade pip && pip install -r requirements.txt -t build/ --no-cache-dir"
+            -c "pip install --upgrade pip && pip install -r requirements.txt -t build/ --no-cache-dir"
 
       - name: Package Lambda source
         run: |
           cp -R src/. build/
           cd build
-          zip -r ../lambda_package.zip .
+          find . -type d -name "__pycache__" -exec rm -r {} + 2>/dev/null || true
+          find . -type f -name "*.pyc" -delete
+          find . -type f -name "*.pyo" -delete
+          zip -r ../lambda_package.zip . -x "*.pyc" -x "*.pyo" -x "*/__pycache__/*" -x "__pycache__/*"
 
       - name: Deploy Lambda
         run: |
