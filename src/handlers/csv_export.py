@@ -10,6 +10,7 @@ import boto3
 
 from db.postgres import DatabaseError, get_connection
 from config.csv_export.headers import TABLE_EXPORT_CONFIG
+from config.csv_export.queries import get_query_builder
 
 S3_CLIENT = boto3.client("s3")
 
@@ -22,35 +23,52 @@ LOCAL_S3_BASE_URL = os.getenv("LOCAL_S3_BASE_URL", "")
 # Data access helpers
 # --------------------------------------------------------------------------- #
 
-def _fetch_records(table: str, record_ids: List[int], is_all_record: bool) -> List[Dict[str, Any]]:
+def _fetch_records(file_type: str, record_ids: List[int], is_all_record: bool) -> List[Dict[str, Any]]:
   """
   対象テーブルからレコードを取得する。
 
   Parameters
   ----------
-  table: str
-      取得対象のテーブル名（小文字想定）
+  file_type: str
+      ファイルタイプ（例: "users", "product"）
   record_ids: List[int]
       取得対象のIDリスト
   is_all_record: bool
       True の場合、ID指定を無視して全件取得する
+
+  Returns
+  -------
+  List[Dict[str, Any]]
+      取得したレコードのリスト
   """
 
-  query = f"SELECT * FROM {table}"
-  params: List[Any] = []
+  try:
+    # file_typeに対応するクエリビルダーを取得
+    build_query, transform_row = get_query_builder(file_type)
+    query, params = build_query(record_ids, is_all_record)
+  except KeyError:
+    # クエリビルダーが存在しない場合は、デフォルトのクエリを使用
+    table = file_type.lower()
+    query = f"SELECT * FROM {table}"
+    params: List[Any] = []
 
-  if not is_all_record:
-    if not record_ids:
-      return []
-    placeholders = ",".join(["%s"] * len(record_ids))
-    query += f" WHERE id IN ({placeholders})"
-    params = record_ids
+    if not is_all_record:
+      if not record_ids:
+        return []
+      placeholders = ",".join(["%s"] * len(record_ids))
+      query += f" WHERE id IN ({placeholders})"
+      params = record_ids
+    
+    # デフォルトの場合はtransform_rowは不要
+    transform_row = lambda row: row
 
   with get_connection(timeout=5) as conn:
     with conn.cursor() as cursor:
       cursor.execute(query, params)
       columns = [col[0] for col in cursor.description] if cursor.description else []
-      return [dict(zip(columns, row)) for row in cursor.fetchall()]
+      rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+      # 各行を変換関数で処理
+      return [transform_row(row) for row in rows]
 
 
 def _update_exported_file(record_id: int, download_url: str) -> None:
@@ -174,8 +192,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       exported_file_id = int(payload["exported_file_id"])
       table = file_type.lower()
       
-      print(f"Fetching records from table: {table}, record_ids: {record_ids}, is_all_record: {is_all_record}")
-      rows = _fetch_records(table, record_ids, is_all_record)
+      print(f"Fetching records from file_type: {file_type}, table: {table}, record_ids: {record_ids}, is_all_record: {is_all_record}")
+      rows = _fetch_records(file_type, record_ids, is_all_record)
       print(f"Fetched {len(rows)} records")
       
       print("Generating CSV")

@@ -15,6 +15,6 @@ services:
     entrypoint:
       - python
       - -m
-      - debug.qr_export_runner
+      - debug.csv_export_runner
 
 ## 開発を行うhandlerに合わせ"debug.csv_export_runner"または"debug.qr_export_runner"を変更してください
