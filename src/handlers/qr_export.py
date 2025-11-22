@@ -214,13 +214,13 @@ def _upload_to_s3(pdf_path: Path, bucket: str, key: str) -> None:
     raise
 
 
-def _build_s3_key(table: str, exported_file_id: int) -> str:
+def _build_s3_key(file_type: str, exported_file_id: int) -> str:
   """
   QR PDF 用の S3 キーを生成する。
   """
 
   timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-  return f"qr_exports/{table}/{exported_file_id}-{timestamp}.pdf"
+  return f"qr_exports/{file_type}/{exported_file_id}-{timestamp}.pdf"
 
 
 def _generate_download_url(bucket: str, key: str, expires_in: int) -> str:
@@ -301,7 +301,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
   期待するメッセージ例:
   {
-      "table": "users",
+      "file_type": "users",
       "record_ids": [1, 2, 3],
       "is_all_record": false,
       "exported_file_id": 42
@@ -331,12 +331,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
       print(f"[Lambda Handler] Processing record: {record}")
       payload = json.loads(record["body"])
-      table = payload["table"]
+      file_type = payload["file_type"]
       record_ids = payload.get("record_ids", [])
       is_all_record = bool(payload.get("is_all_record", False))
       exported_file_id = int(payload["exported_file_id"])
+      table = file_type.lower()
 
-      print(f"[Lambda Handler] Parameters: table={table}, record_ids={record_ids}, is_all_record={is_all_record}, exported_file_id={exported_file_id}")
+      print(f"[Lambda Handler] Parameters: file_type={file_type}, table={table}, record_ids={record_ids}, is_all_record={is_all_record}, exported_file_id={exported_file_id}")
 
       print(f"[PDF Generation] Starting PDF generation for table={table}")
       output_path = generate_qr_pdf(table, record_ids, is_all_record)
@@ -344,7 +345,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
       try:
         bucket = default_bucket
-        key = _build_s3_key(table, exported_file_id)
+        key = _build_s3_key(file_type, exported_file_id)
         print(f"[S3] Prepared S3 location: bucket={bucket}, key={key}")
 
         _upload_to_s3(output_path, bucket, key)
@@ -358,7 +359,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         results.append(
             {
-                "table": table,
+                "file_type": file_type,
                 "exported_file_id": exported_file_id,
                 "record_count": len(record_ids) if not is_all_record else "all",
                 "s3_url": download_url,
@@ -377,7 +378,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       print(f"[Lambda Handler] Traceback: {traceback.format_exc()}")
       results.append(
           {
-              "table": None,
+              "file_type": None,
               "exported_file_id": None,
               "error": error_msg,
           }
@@ -388,7 +389,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       print(f"[Lambda Handler] Traceback: {traceback.format_exc()}")
       results.append(
           {
-              "table": payload.get("table") if isinstance(payload, dict) else None,
+              "file_type": payload.get("file_type") if isinstance(payload, dict) else None,
               "exported_file_id": payload.get("exported_file_id") if isinstance(payload, dict) else None,
               "error": error_msg,
           }
@@ -399,7 +400,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       print(f"[Lambda Handler] Traceback: {traceback.format_exc()}")
       results.append(
           {
-              "table": payload.get("table") if isinstance(payload, dict) else None,
+              "file_type": payload.get("file_type") if isinstance(payload, dict) else None,
               "exported_file_id": payload.get("exported_file_id") if isinstance(payload, dict) else None,
               "error": error_msg,
           }
