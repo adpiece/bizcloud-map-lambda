@@ -23,21 +23,63 @@ TableConfig = Mapping[str, object]
 TABLE_EXPORT_CONFIG: Dict[str, TableConfig] = {
     "users": {
         "field_order": [
-            "id",
-            "provider",
-            "uid",
             "name",
             "email",
-            "created_at",
+            "role",
+            "status",
             "updated_at",
         ],
         "labels": {
-            "id": "ID",
-            "provider": "プロバイダ",
-            "uid": "UID",
-            "name": "氏名",
+            "name": "アカウント名",
             "email": "メールアドレス",
-            "created_at": "作成日時",
+            "role": "ロール",
+            "status": "ステータス",
+            "updated_at": "更新日時",
+        },
+    },
+    "products": {
+        "field_order": [
+            "category_name",
+            "product_name",
+            "product_code",
+            "manufacturer_name",
+            "updated_at",
+        ],
+        "labels": {
+            "category_name": "カテゴリ",
+            "product_name": "品名",
+            "product_code": "品番",
+            "manufacturer_name": "メーカー",
+            "updated_at": "更新日時",
+        },
+    },
+    "categories": {
+        "field_order": [
+            "name",
+            "code",
+            "label_color",
+            "status",
+            "updated_at",
+        ],
+        "labels": {
+            "name": "カテゴリ名",
+            "code": "コード",
+            "label_color": "ラベル色",
+            "status": "ステータス",
+            "updated_at": "更新日時",
+        },
+    },
+    "manufacturers": {
+        "field_order": [
+            "name",
+            "code",
+            "status",
+            "updated_at",
+        ],
+        "labels": {
+            "name": "メーカー名",
+            "code": "コード",
+            "status": "ステータス",
             "updated_at": "更新日時",
         },
     },
