@@ -13,7 +13,7 @@ from .categories import build_query as build_categories_query, transform_row as 
 from .manufacturers import build_query as build_manufacturers_query, transform_row as transform_manufacturers_row
 
 # file_type -> (build_query関数, transform_row関数) のマッピング
-QUERY_BUILDERS: Dict[str, Tuple[Callable[[List[int], bool], Tuple[str, List[Any]]], Callable[[Dict[str, Any]], Dict[str, Any]]]] = {
+QUERY_BUILDERS: Dict[str, Tuple[Callable[[List[int]], Tuple[str, List[Any]]], Callable[[Dict[str, Any]], Dict[str, Any]]]] = {
     "users": (build_users_query, transform_users_row),
     "products": (build_product_query, transform_product_row),
     "categories": (build_categories_query, transform_categories_row),
@@ -21,7 +21,7 @@ QUERY_BUILDERS: Dict[str, Tuple[Callable[[List[int], bool], Tuple[str, List[Any]
 }
 
 
-def get_query_builder(file_type: str) -> Tuple[Callable[[List[int], bool], Tuple[str, List[Any]]], Callable[[Dict[str, Any]], Dict[str, Any]]]:
+def get_query_builder(file_type: str) -> Tuple[Callable[[List[int]], Tuple[str, List[Any]]], Callable[[Dict[str, Any]], Dict[str, Any]]]:
     """
     file_typeに対応するクエリビルダーと行変換関数を取得する。
     

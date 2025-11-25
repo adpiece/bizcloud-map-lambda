@@ -23,7 +23,7 @@ LOCAL_S3_BASE_URL = os.getenv("LOCAL_S3_BASE_URL", "")
 # Data access helpers
 # --------------------------------------------------------------------------- #
 
-def _fetch_records(file_type: str, record_ids: List[int], is_all_record: bool) -> List[Dict[str, Any]]:
+def _fetch_records(file_type: str, record_ids: List[int]) -> List[Dict[str, Any]]:
   """
   対象テーブルからレコードを取得する。
 
@@ -33,8 +33,6 @@ def _fetch_records(file_type: str, record_ids: List[int], is_all_record: bool) -
       ファイルタイプ（例: "users", "product"）
   record_ids: List[int]
       取得対象のIDリスト
-  is_all_record: bool
-      True の場合、ID指定を無視して全件取得する
 
   Returns
   -------
@@ -42,22 +40,19 @@ def _fetch_records(file_type: str, record_ids: List[int], is_all_record: bool) -
       取得したレコードのリスト
   """
 
+  if not record_ids:
+    raise ValueError("record_ids is required.")
+
   try:
     # file_typeに対応するクエリビルダーを取得
     build_query, transform_row = get_query_builder(file_type)
-    query, params = build_query(record_ids, is_all_record)
+    query, params = build_query(record_ids)
   except KeyError:
     # クエリビルダーが存在しない場合は、デフォルトのクエリを使用
     table = file_type.lower()
-    query = f"SELECT * FROM {table}"
-    params: List[Any] = []
-
-    if not is_all_record:
-      if not record_ids:
-        return []
-      placeholders = ",".join(["%s"] * len(record_ids))
-      query += f" WHERE id IN ({placeholders})"
-      params = record_ids
+    placeholders = ",".join(["%s"] * len(record_ids))
+    query = f"SELECT * FROM {table} WHERE id IN ({placeholders})"
+    params: List[Any] = record_ids
     
     # デフォルトの場合はtransform_rowは不要
     transform_row = lambda row: row
@@ -188,12 +183,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       print(f"Payload: {json.dumps(payload)}")
       file_type = payload["file_type"]
       record_ids = payload.get("record_ids", [])
-      is_all_record = bool(payload.get("is_all_record", False))
+      if not record_ids:
+        raise ValueError("record_ids is required.")
       exported_file_id = int(payload["exported_file_id"])
       table = file_type.lower()
       
-      print(f"Fetching records from file_type: {file_type}, table: {table}, record_ids: {record_ids}, is_all_record: {is_all_record}")
-      rows = _fetch_records(file_type, record_ids, is_all_record)
+      print(f"Fetching records from file_type: {file_type}, table: {table}, record_ids: {record_ids}")
+      rows = _fetch_records(file_type, record_ids)
       print(f"Fetched {len(rows)} records")
       
       print("Generating CSV")

@@ -7,7 +7,7 @@ productテーブルはcategoriesとmanufacturersテーブルと関連してい�
 from typing import Any, Dict, List, Tuple
 
 
-def build_query(record_ids: List[int], is_all_record: bool) -> Tuple[str, List[Any]]:
+def build_query(record_ids: List[int]) -> Tuple[str, List[Any]]:
     """
     productテーブル用のクエリを構築する。
     
@@ -15,8 +15,6 @@ def build_query(record_ids: List[int], is_all_record: bool) -> Tuple[str, List[A
     ----------
     record_ids: List[int]
         取得対象のIDリスト
-    is_all_record: bool
-        True の場合、ID指定を無視して全件取得する
     
     Returns
     -------
@@ -37,17 +35,12 @@ def build_query(record_ids: List[int], is_all_record: bool) -> Tuple[str, List[A
         LEFT JOIN manufacturers m ON p.manufacturer_id = m.id
     """
     
-    params: List[Any] = []
-    
-    if not is_all_record:
-        if not record_ids:
-            # 空のリストの場合は空の結果を返す
-            query = "SELECT * FROM products WHERE 1=0"
-            return query, params
-        
-        placeholders = ",".join(["%s"] * len(record_ids))
-        query += f" WHERE p.id IN ({placeholders})"
-        params = record_ids
+    if not record_ids:
+        raise ValueError("record_ids is required.")
+
+    placeholders = ",".join(["%s"] * len(record_ids))
+    query += f" WHERE p.id IN ({placeholders})"
+    params: List[Any] = record_ids
     
     query += " ORDER BY p.id"
     

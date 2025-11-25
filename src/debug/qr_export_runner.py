@@ -12,13 +12,12 @@ def main() -> None:
   - 未設定の場合はデフォルト値で実行
 
   例:
-    SQS_PAYLOAD='{"file_type": "users", "record_ids": [1,2,3], "is_all_record": false, "exported_file_id": 42}'
+    SQS_PAYLOAD='{"file_type": "users", "record_ids": [1,2,3], "exported_file_id": 42}'
   """
 
   default_payload = {
       "file_type": "users",
       "record_ids": [1, 2, 3],
-      "is_all_record": False,
       "exported_file_id": 1,
   }
 
