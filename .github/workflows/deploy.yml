@@ -52,13 +52,6 @@ jobs:
           cd build
           zip -r ../lambda_package.zip .
 
-      - name: Deploy Lambda
-        run: |
-          aws lambda update-function-code \
-            --function-name bizCloudMapRdsTest \
-            --zip-file fileb://lambda_package.zip \
-            --publish
-
       - name: Deploy CSV Export Lambda
         run: |
           aws lambda update-function-code \
