@@ -26,20 +26,17 @@ QR_LOGO_RATIO = float(os.getenv("QR_LOGO_RATIO", "0.25"))
 QR_COLS_PER_ROW = int(os.getenv("QR_COLS_PER_ROW", "4"))
 
 
-def _fetch_ids(table: str, record_ids: List[int], is_all_record: bool) -> List[int]:
+def _fetch_ids(table: str, record_ids: List[int]) -> List[int]:
   """
   対象テーブルから QR を発行するレコード ID を取得する。
   """
 
-  query = f"SELECT id FROM {table}"
-  params: List[Any] = []
+  if not record_ids:
+    raise ValueError("record_ids is required.")
 
-  if not is_all_record:
-    if not record_ids:
-      return []
-    placeholders = ",".join(["%s"] * len(record_ids))
-    query += f" WHERE id IN ({placeholders})"
-    params = record_ids
+  placeholders = ",".join(["%s"] * len(record_ids))
+  query = f"SELECT id FROM {table} WHERE id IN ({placeholders})"
+  params: List[Any] = record_ids
 
   with get_connection(timeout=5) as conn:
     with conn.cursor() as cursor:
@@ -245,7 +242,7 @@ def _generate_download_url(bucket: str, key: str, expires_in: int) -> str:
 # QR PDF generation
 # --------------------------------------------------------------------------- #
 
-def generate_qr_pdf(table: str, record_ids: List[int], is_all_record: bool) -> Path:
+def generate_qr_pdf(table: str, record_ids: List[int]) -> Path:
   """
   指定テーブル / レコード ID に対する QR コード PDF をローカルに出力する。
 
@@ -255,15 +252,13 @@ def generate_qr_pdf(table: str, record_ids: List[int], is_all_record: bool) -> P
       対象テーブル名（小文字想定）
   record_ids: List[int]
       対象レコード ID のリスト
-  is_all_record: bool
-      True の場合、テーブル全件分の QR を作成する
   """
 
   front_domain = os.environ["FRONT_DOMAIN"]
   print(f"[PDF Generation] Front domain: {front_domain}")
 
-  print(f"[PDF Generation] Fetching IDs: table={table}, record_ids={record_ids}, is_all_record={is_all_record}")
-  ids = _fetch_ids(table, record_ids, is_all_record)
+  print(f"[PDF Generation] Fetching IDs: table={table}, record_ids={record_ids}")
+  ids = _fetch_ids(table, record_ids)
   print(f"[PDF Generation] Fetched {len(ids)} record IDs: {ids}")
   
   if not ids:
@@ -303,7 +298,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
   {
       "file_type": "users",
       "record_ids": [1, 2, 3],
-      "is_all_record": false,
       "exported_file_id": 42
   }
   """
@@ -333,14 +327,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       payload = json.loads(record["body"])
       file_type = payload["file_type"]
       record_ids = payload.get("record_ids", [])
-      is_all_record = bool(payload.get("is_all_record", False))
       exported_file_id = int(payload["exported_file_id"])
       table = file_type.lower()
 
-      print(f"[Lambda Handler] Parameters: file_type={file_type}, table={table}, record_ids={record_ids}, is_all_record={is_all_record}, exported_file_id={exported_file_id}")
+      print(f"[Lambda Handler] Parameters: file_type={file_type}, table={table}, record_ids={record_ids}, exported_file_id={exported_file_id}")
 
       print(f"[PDF Generation] Starting PDF generation for table={table}")
-      output_path = generate_qr_pdf(table, record_ids, is_all_record)
+      output_path = generate_qr_pdf(table, record_ids)
       print(f"[PDF Generation] PDF generated: path={output_path}, size={output_path.stat().st_size} bytes")
 
       try:
@@ -361,7 +354,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             {
                 "file_type": file_type,
                 "exported_file_id": exported_file_id,
-                "record_count": len(record_ids) if not is_all_record else "all",
+                "record_count": len(record_ids),
                 "s3_url": download_url,
             }
         )
