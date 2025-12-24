@@ -21,7 +21,26 @@ USE_LOCAL_S3 = os.getenv("USE_LOCAL_S3", "").lower() in {"1", "true", "yes"}
 LOCAL_S3_DIR = Path(os.getenv("LOCAL_S3_DIR", "/var/task/.local_s3"))
 LOCAL_S3_BASE_URL = os.getenv("LOCAL_S3_BASE_URL", "")
 
-QR_LOGO_PATH = Path(os.getenv("QR_LOGO_PATH", "src/assets/minato_qr_logo.png"))
+# ロゴパスの解決: 環境変数が指定されていない場合、Lambda環境とローカル環境の両方に対応
+_default_logo_paths = [
+    "assets/minato_qr_logo.png",  # Lambda環境（/var/task/assets/）
+    "src/assets/minato_qr_logo.png",  # ローカル環境
+]
+_logo_path = os.getenv("QR_LOGO_PATH")
+if _logo_path:
+    QR_LOGO_PATH = Path(_logo_path)
+else:
+    # デフォルトパスを順にチェック
+    QR_LOGO_PATH = None
+    for path_str in _default_logo_paths:
+        candidate = Path(path_str)
+        if candidate.exists():
+            QR_LOGO_PATH = candidate
+            break
+    if QR_LOGO_PATH is None:
+        # どちらも存在しない場合は最初のパスを使用（エラーハンドリングは後続処理で行う）
+        QR_LOGO_PATH = Path(_default_logo_paths[0])
+
 QR_LOGO_RATIO = float(os.getenv("QR_LOGO_RATIO", "0.25"))
 QR_COLS_PER_ROW = int(os.getenv("QR_COLS_PER_ROW", "4"))
 
@@ -117,10 +136,12 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
     if center_image:
       try:
         if center_image not in logo_cache:
+          print(f"[PDF Layout] Loading logo image: {center_image}")
           logo_cache[center_image] = ImageReader(center_image)
         reader = logo_cache[center_image]
         img_w, img_h = reader.getSize()
-      except Exception:
+      except Exception as e:
+        print(f"[PDF Layout] WARNING: Failed to load logo image {center_image}: {str(e)}")
         reader = None
         img_w = img_h = 0
 
@@ -134,6 +155,8 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
         c.setStrokeColorRGB(0, 0, 0)
         c.setLineWidth(0.5)
         c.rect(logo_x, logo_y, logo_width, logo_height, fill=0, stroke=1)
+      elif center_image:
+        print(f"[PDF Layout] WARNING: Logo image {center_image} could not be loaded (reader={reader}, size={img_w}x{img_h})")
 
     if label is not None:
       c.setFont("Helvetica", 8)
@@ -265,6 +288,12 @@ def generate_qr_pdf(table: str, record_ids: List[int]) -> Path:
     raise ValueError("QR を作成する対象レコードが存在しません。")
 
   print(f"[PDF Generation] Generating QR images for {len(ids)} records")
+  # ロゴパスの確認とログ出力
+  if QR_LOGO_PATH.exists():
+    print(f"[PDF Generation] Logo image found: {QR_LOGO_PATH} (size: {QR_LOGO_PATH.stat().st_size} bytes)")
+  else:
+    print(f"[PDF Generation] WARNING: Logo image not found at {QR_LOGO_PATH}. QR codes will be generated without center logo.")
+  
   images: List[Dict[str, Any]] = []
   for record_id in ids:
     url = _build_qr_url(front_domain, record_id)
