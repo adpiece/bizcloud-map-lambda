@@ -43,8 +43,8 @@ else:
 
 QR_LOGO_RATIO = float(os.getenv("QR_LOGO_RATIO", "0.25"))
 QR_COLS_PER_ROW = int(os.getenv("QR_COLS_PER_ROW", "4"))
-QR_BOX_SIZE = int(os.getenv("QR_BOX_SIZE", "12"))  # QRコードの解像度（大きいほど鮮明、メモリ消費も増加）
-QR_SCALE_FACTOR = float(os.getenv("QR_SCALE_FACTOR", "1.5"))  # PDF描画時のスケールファクター（大きいほど鮮明、メモリ消費も増加）
+QR_BOX_SIZE = int(os.getenv("QR_BOX_SIZE", "16"))  # QRコードの解像度（大きいほど鮮明、メモリ消費も増加）
+QR_SCALE_FACTOR = float(os.getenv("QR_SCALE_FACTOR", "2.0"))  # PDF描画時のスケールファクター（大きいほど鮮明、メモリ消費も増加）
 
 
 def _fetch_ids(table: str, record_ids: List[int]) -> List[int]:
