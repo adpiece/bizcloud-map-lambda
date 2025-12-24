@@ -16,7 +16,7 @@ def main() -> None:
   """
 
   default_payload = {
-      "file_type": "users",
+      "file_type": "products",
       "record_ids": [1, 2, 3],
       "exported_file_id": 1,
   }
