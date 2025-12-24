@@ -21,7 +21,7 @@ USE_LOCAL_S3 = os.getenv("USE_LOCAL_S3", "").lower() in {"1", "true", "yes"}
 LOCAL_S3_DIR = Path(os.getenv("LOCAL_S3_DIR", "/var/task/.local_s3"))
 LOCAL_S3_BASE_URL = os.getenv("LOCAL_S3_BASE_URL", "")
 
-# ロゴパスの解決: 環境変数が指定されていない場合、Lambda環境とローカル環境の両方に対応
+# ロゴパスの解決: 環境変数が指定されていない場合、Lambda環境とローカル環境の両方に対応技
 _default_logo_paths = [
     "assets/minato_qr_logo.png",  # Lambda環境（/var/task/assets/）
     "src/assets/minato_qr_logo.png",  # ローカル環境
@@ -115,8 +115,16 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
   col = 0
   row = 0
   logo_cache: Dict[str, ImageReader] = {}
+  
+  # image_dataをリストに変換して、長さを取得できるようにする
+  image_list = list(image_data)
+  total_items = len(image_list)
+  print(f"[PDF Layout] Starting PDF layout with {total_items} QR codes")
+  item_count = 0
 
-  for item in image_data:
+  for item in image_list:
+    item_count += 1
+    print(f"[PDF Layout] Processing item {item_count}/{total_items} (row={row}, col={col})")
     img = item["image"]
     label = item.get("label")
     center_image = item.get("center_image")
@@ -128,30 +136,41 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
 
     # PIL.Image を一度一時ファイルに保存し、それを貼り付け
     # （メモリバッファでの貼り付けも可能だが、実装をシンプルに保つ）
+    print(f"[PDF Layout] Saving QR image to temporary file...")
     tmp_path = output_path.parent / f"._qr_tmp_{row}_{col}.png"
     img.resize((int(cell_width), int(cell_width))).save(tmp_path)
+    print(f"[PDF Layout] Drawing QR image on PDF...")
     c.drawImage(str(tmp_path), x, y, width=cell_width, height=cell_width)
     tmp_path.unlink(missing_ok=True)
+    print(f"[PDF Layout] QR image drawn successfully")
 
     if center_image:
       try:
         if center_image not in logo_cache:
           print(f"[PDF Layout] Loading logo image: {center_image}")
+          print(f"[PDF Layout] Creating ImageReader for logo...")
           logo_cache[center_image] = ImageReader(center_image)
+          print(f"[PDF Layout] ImageReader created successfully")
         reader = logo_cache[center_image]
+        print(f"[PDF Layout] Getting logo image size...")
         img_w, img_h = reader.getSize()
+        print(f"[PDF Layout] Logo image size: {img_w}x{img_h}")
       except Exception as e:
         print(f"[PDF Layout] WARNING: Failed to load logo image {center_image}: {str(e)}")
+        print(f"[PDF Layout] Traceback: {traceback.format_exc()}")
         reader = None
         img_w = img_h = 0
 
       if reader and img_w > 0:
+        print(f"[PDF Layout] Drawing logo on PDF...")
         logo_width = cell_width * QR_LOGO_RATIO
         aspect = img_h / img_w
         logo_height = logo_width * aspect
         logo_x = x + (cell_width - logo_width) / 2
         logo_y = y + (cell_width - logo_height) / 2
+        print(f"[PDF Layout] Logo position: x={logo_x}, y={logo_y}, width={logo_width}, height={logo_height}")
         c.drawImage(reader, logo_x, logo_y, width=logo_width, height=logo_height, mask="auto")
+        print(f"[PDF Layout] Logo drawn successfully")
         c.setStrokeColorRGB(0, 0, 0)
         c.setLineWidth(0.5)
         c.rect(logo_x, logo_y, logo_width, logo_height, fill=0, stroke=1)
@@ -168,10 +187,15 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
       col = 0
       row += 1
       if margin_y + (row + 1) * cell_height > page_height - margin_y:
+        print(f"[PDF Layout] Starting new page (row={row})")
         c.showPage()
         row = 0
+    
+    print(f"[PDF Layout] Completed processing item {item_count}")
 
+  print(f"[PDF Layout] All items processed. Saving PDF to {output_path}...")
   c.save()
+  print(f"[PDF Layout] PDF saved successfully. File size: {output_path.stat().st_size} bytes")
 
 
 # --------------------------------------------------------------------------- #
