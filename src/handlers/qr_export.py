@@ -4,7 +4,7 @@ import tempfile
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 import boto3
 import qrcode
@@ -21,7 +21,7 @@ USE_LOCAL_S3 = os.getenv("USE_LOCAL_S3", "").lower() in {"1", "true", "yes"}
 LOCAL_S3_DIR = Path(os.getenv("LOCAL_S3_DIR", "/var/task/.local_s3"))
 LOCAL_S3_BASE_URL = os.getenv("LOCAL_S3_BASE_URL", "")
 
-# ロゴパスの解決: 環境変数が指定されていない場合、Lambda環境とローカル環境の両方に対応
+# ロゴパスの解決: 環境変数が指定されていない場合、Lambda環境とローカル環境の両方に対応技
 _default_logo_paths = [
     "assets/minato_qr_logo.png",  # Lambda環境（/var/task/assets/）
     "src/assets/minato_qr_logo.png",  # ローカル環境
@@ -43,6 +43,8 @@ else:
 
 QR_LOGO_RATIO = float(os.getenv("QR_LOGO_RATIO", "0.25"))
 QR_COLS_PER_ROW = int(os.getenv("QR_COLS_PER_ROW", "4"))
+QR_BOX_SIZE = int(os.getenv("QR_BOX_SIZE", "12"))  # QRコードの解像度（大きいほど鮮明、メモリ消費も増加）
+QR_SCALE_FACTOR = float(os.getenv("QR_SCALE_FACTOR", "1.5"))  # PDF描画時のスケールファクター（大きいほど鮮明、メモリ消費も増加）
 
 
 def _fetch_ids(table: str, record_ids: List[int]) -> List[int]:
@@ -76,17 +78,184 @@ def _build_qr_url(front_domain: str, record_id: int) -> str:
 def _generate_qr_image(data: str):
   """
   QR コード画像 (PIL.Image) を生成する。
+  メモリ消費を抑えつつ、読み取り可能な品質を保つ。
   """
 
   qr = qrcode.QRCode(
       version=None,
       error_correction=qrcode.constants.ERROR_CORRECT_M,
-      box_size=10,
-      border=2,
+      box_size=QR_BOX_SIZE,  # 解像度（デフォルト: 12、環境変数で調整可能）
+      border=3,  # ボーダー（読み取りやすさとメモリ消費のバランス）
   )
   qr.add_data(data)
   qr.make(fit=True)
   return qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+
+
+def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, center_image_path: Optional[str], output_path: Path) -> None:
+  """
+  QRコードを1つずつ生成してPDFに描画するストリーミング処理。
+  メモリに全ての画像を保持せず、1つずつ処理してPDFに書き込む。
+  
+  Parameters
+  ----------
+  record_ids: List[int]
+      対象レコード ID のリスト
+  front_domain: str
+      フロントエンドのドメイン
+  center_image_path: Optional[str]
+      ロゴ画像のパス（Noneの場合はロゴなし）
+  output_path: Path
+      出力PDFのパス
+  """
+  page_width, page_height = A4
+  margin_x = 40
+  margin_y = 40
+
+  cols = QR_COLS_PER_ROW
+  if cols not in {4, 5, 6, 7, 8}:
+    cols = 4
+
+  cell_width = (page_width - margin_x * 2) / cols
+  label_height = 16
+  cell_height = cell_width + label_height
+
+  # ロゴ画像の最大サイズを計算（メモリ削減のため、適切なサイズにリサイズ）
+  # ロゴは cell_width * QR_LOGO_RATIO のサイズで表示されるので、余裕を持たせて3倍程度にリサイズ
+  max_logo_size = int(cell_width * QR_LOGO_RATIO * 3)
+  print(f"[PDF Layout] Max logo size for memory optimization: {max_logo_size}px")
+
+  c = canvas.Canvas(str(output_path), pagesize=A4)
+
+  col = 0
+  row = 0
+  logo_cache: Dict[str, ImageReader] = {}
+  logo_tmp_files: Dict[str, Path] = {}  # クリーンアップ用の一時ファイルパス
+  
+  total_items = len(record_ids)
+  print(f"[PDF Layout] Starting PDF layout with {total_items} QR codes (streaming mode)")
+  item_count = 0
+
+  for record_id in record_ids:
+    item_count += 1
+    print(f"[PDF Layout] Processing item {item_count}/{total_items} (row={row}, col={col})")
+    
+    # QRコードを生成
+    url = _build_qr_url(front_domain, record_id)
+    img = _generate_qr_image(url)
+    label = f"/quick_access/{record_id}"
+
+    x = margin_x + col * cell_width
+    y = page_height - margin_y - (row + 1) * cell_height + label_height
+
+    # QR画像を一時ファイルに保存してPDFに貼り付け
+    print(f"[PDF Layout] Saving QR image to temporary file...")
+    tmp_path = output_path.parent / f"._qr_tmp_{row}_{col}.png"
+    # 高品質なリサンプリング（LANCZOS）を使用してリサイズ
+    scaled_size = int(cell_width * QR_SCALE_FACTOR)
+    # Pillowのバージョン互換性を考慮
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    resized_img = img.resize((scaled_size, scaled_size), resample)
+    # PNG形式で高品質保存
+    resized_img.save(tmp_path, "PNG", optimize=False)
+    print(f"[PDF Layout] Drawing QR image on PDF (scaled size: {scaled_size}x{scaled_size})...")
+    c.drawImage(str(tmp_path), x, y, width=cell_width, height=cell_width)
+    tmp_path.unlink(missing_ok=True)
+    # 画像オブジェクトを明示的に削除してメモリを解放
+    del img
+    del resized_img
+    print(f"[PDF Layout] QR image drawn successfully")
+
+    # ロゴを描画
+    if center_image_path:
+      try:
+        if center_image_path not in logo_cache:
+          print(f"[PDF Layout] Loading logo image: {center_image_path}")
+          # メモリ削減のため、PILで読み込んで適切なサイズにリサイズしてから一時ファイルに保存
+          print(f"[PDF Layout] Loading and resizing logo with PIL (max size: {max_logo_size}px)...")
+          with Image.open(center_image_path) as logo_img:
+            original_size = logo_img.size
+            print(f"[PDF Layout] Original logo size: {original_size[0]}x{original_size[1]}")
+            
+            # アスペクト比を保ちながらリサイズ（必要以上に大きい場合のみ）
+            if logo_img.width > max_logo_size or logo_img.height > max_logo_size:
+              # Pillowのバージョン互換性を考慮
+              try:
+                resample = Image.Resampling.LANCZOS
+              except AttributeError:
+                resample = Image.LANCZOS
+              logo_img.thumbnail((max_logo_size, max_logo_size), resample)
+              print(f"[PDF Layout] Resized logo to: {logo_img.size[0]}x{logo_img.size[1]}")
+            else:
+              print(f"[PDF Layout] Logo size is already optimal, no resizing needed")
+            
+            # 一時ファイルに保存（メモリから解放するため）
+            logo_tmp_path = output_path.parent / f"._logo_resized_{hash(center_image_path)}.png"
+            logo_img.save(logo_tmp_path, "PNG", optimize=False)
+            logo_tmp_files[center_image_path] = logo_tmp_path  # クリーンアップ用に保存
+            print(f"[PDF Layout] Resized logo saved to temporary file: {logo_tmp_path}")
+            
+            # リサイズ済みの画像をImageReaderで読み込む
+            print(f"[PDF Layout] Creating ImageReader for resized logo...")
+            logo_cache[center_image_path] = ImageReader(str(logo_tmp_path))
+            print(f"[PDF Layout] ImageReader created successfully")
+        reader = logo_cache[center_image_path]
+        print(f"[PDF Layout] Getting logo image size...")
+        img_w, img_h = reader.getSize()
+        print(f"[PDF Layout] Logo image size: {img_w}x{img_h}")
+      except Exception as e:
+        print(f"[PDF Layout] WARNING: Failed to load logo image {center_image_path}: {str(e)}")
+        print(f"[PDF Layout] Traceback: {traceback.format_exc()}")
+        reader = None
+        img_w = img_h = 0
+
+      if reader and img_w > 0:
+        print(f"[PDF Layout] Drawing logo on PDF...")
+        logo_width = cell_width * QR_LOGO_RATIO
+        aspect = img_h / img_w
+        logo_height = logo_width * aspect
+        logo_x = x + (cell_width - logo_width) / 2
+        logo_y = y + (cell_width - logo_height) / 2
+        print(f"[PDF Layout] Logo position: x={logo_x}, y={logo_y}, width={logo_width}, height={logo_height}")
+        c.drawImage(reader, logo_x, logo_y, width=logo_width, height=logo_height, mask="auto")
+        print(f"[PDF Layout] Logo drawn successfully")
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.5)
+        c.rect(logo_x, logo_y, logo_width, logo_height, fill=0, stroke=1)
+      elif center_image_path:
+        print(f"[PDF Layout] WARNING: Logo image {center_image_path} could not be loaded (reader={reader}, size={img_w}x{img_h})")
+
+    # ラベルを描画
+    if label is not None:
+      c.setFont("Helvetica", 8)
+      c.drawCentredString(x + cell_width / 2, y - 4, str(label))
+
+    col += 1
+    if col >= cols:
+      col = 0
+      row += 1
+      if margin_y + (row + 1) * cell_height > page_height - margin_y:
+        print(f"[PDF Layout] Starting new page (row={row})")
+        c.showPage()
+        row = 0
+    
+    print(f"[PDF Layout] Completed processing item {item_count}")
+
+  print(f"[PDF Layout] All items processed. Saving PDF to {output_path}...")
+  c.save()
+  print(f"[PDF Layout] PDF saved successfully. File size: {output_path.stat().st_size} bytes")
+  
+  # ロゴの一時ファイルをクリーンアップ
+  for logo_path in logo_tmp_files.values():
+    try:
+      if logo_path.exists():
+        logo_path.unlink(missing_ok=True)
+        print(f"[PDF Layout] Cleaned up temporary logo file: {logo_path}")
+    except Exception as e:
+      print(f"[PDF Layout] WARNING: Failed to cleanup logo temp file {logo_path}: {str(e)}")
 
 
 def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) -> None:
@@ -115,8 +284,16 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
   col = 0
   row = 0
   logo_cache: Dict[str, ImageReader] = {}
+  
+  # image_dataをリストに変換して、長さを取得できるようにする
+  image_list = list(image_data)
+  total_items = len(image_list)
+  print(f"[PDF Layout] Starting PDF layout with {total_items} QR codes")
+  item_count = 0
 
-  for item in image_data:
+  for item in image_list:
+    item_count += 1
+    print(f"[PDF Layout] Processing item {item_count}/{total_items} (row={row}, col={col})")
     img = item["image"]
     label = item.get("label")
     center_image = item.get("center_image")
@@ -127,31 +304,52 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
     y = page_height - margin_y - (row + 1) * cell_height + label_height
 
     # PIL.Image を一度一時ファイルに保存し、それを貼り付け
-    # （メモリバッファでの貼り付けも可能だが、実装をシンプルに保つ）
+    # 高解像度で描画するため、スケールファクターを適用してリサイズ
+    print(f"[PDF Layout] Saving QR image to temporary file...")
     tmp_path = output_path.parent / f"._qr_tmp_{row}_{col}.png"
-    img.resize((int(cell_width), int(cell_width))).save(tmp_path)
+    # 高品質なリサンプリング（LANCZOS）を使用してリサイズ
+    scaled_size = int(cell_width * QR_SCALE_FACTOR)
+    # Pillowのバージョン互換性を考慮
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    resized_img = img.resize((scaled_size, scaled_size), resample)
+    # PNG形式で高品質保存
+    resized_img.save(tmp_path, "PNG", optimize=False)
+    print(f"[PDF Layout] Drawing QR image on PDF (scaled size: {scaled_size}x{scaled_size})...")
+    # 高解像度の画像をPDFに描画（実際の表示サイズはcell_width）
     c.drawImage(str(tmp_path), x, y, width=cell_width, height=cell_width)
     tmp_path.unlink(missing_ok=True)
+    print(f"[PDF Layout] QR image drawn successfully")
 
     if center_image:
       try:
         if center_image not in logo_cache:
           print(f"[PDF Layout] Loading logo image: {center_image}")
+          print(f"[PDF Layout] Creating ImageReader for logo...")
           logo_cache[center_image] = ImageReader(center_image)
+          print(f"[PDF Layout] ImageReader created successfully")
         reader = logo_cache[center_image]
+        print(f"[PDF Layout] Getting logo image size...")
         img_w, img_h = reader.getSize()
+        print(f"[PDF Layout] Logo image size: {img_w}x{img_h}")
       except Exception as e:
         print(f"[PDF Layout] WARNING: Failed to load logo image {center_image}: {str(e)}")
+        print(f"[PDF Layout] Traceback: {traceback.format_exc()}")
         reader = None
         img_w = img_h = 0
 
       if reader and img_w > 0:
+        print(f"[PDF Layout] Drawing logo on PDF...")
         logo_width = cell_width * QR_LOGO_RATIO
         aspect = img_h / img_w
         logo_height = logo_width * aspect
         logo_x = x + (cell_width - logo_width) / 2
         logo_y = y + (cell_width - logo_height) / 2
+        print(f"[PDF Layout] Logo position: x={logo_x}, y={logo_y}, width={logo_width}, height={logo_height}")
         c.drawImage(reader, logo_x, logo_y, width=logo_width, height=logo_height, mask="auto")
+        print(f"[PDF Layout] Logo drawn successfully")
         c.setStrokeColorRGB(0, 0, 0)
         c.setLineWidth(0.5)
         c.rect(logo_x, logo_y, logo_width, logo_height, fill=0, stroke=1)
@@ -168,10 +366,15 @@ def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) 
       col = 0
       row += 1
       if margin_y + (row + 1) * cell_height > page_height - margin_y:
+        print(f"[PDF Layout] Starting new page (row={row})")
         c.showPage()
         row = 0
+    
+    print(f"[PDF Layout] Completed processing item {item_count}")
 
+  print(f"[PDF Layout] All items processed. Saving PDF to {output_path}...")
   c.save()
+  print(f"[PDF Layout] PDF saved successfully. File size: {output_path.stat().st_size} bytes")
 
 
 # --------------------------------------------------------------------------- #
@@ -268,6 +471,9 @@ def _generate_download_url(bucket: str, key: str, expires_in: int) -> str:
 def generate_qr_pdf(table: str, record_ids: List[int]) -> Path:
   """
   指定テーブル / レコード ID に対する QR コード PDF をローカルに出力する。
+  
+  メモリ効率を考慮し、QRコードを1つずつ生成してPDFに描画するストリーミング処理を採用。
+  大量データでもメモリ使用量が一定に保たれます。
 
   Parameters
   ----------
@@ -282,39 +488,27 @@ def generate_qr_pdf(table: str, record_ids: List[int]) -> Path:
 
   print(f"[PDF Generation] Fetching IDs: table={table}, record_ids={record_ids}")
   ids = _fetch_ids(table, record_ids)
-  print(f"[PDF Generation] Fetched {len(ids)} record IDs: {ids}")
+  print(f"[PDF Generation] Fetched {len(ids)} record IDs")
   
   if not ids:
     raise ValueError("QR を作成する対象レコードが存在しません。")
 
-  print(f"[PDF Generation] Generating QR images for {len(ids)} records")
   # ロゴパスの確認とログ出力
-  if QR_LOGO_PATH.exists():
+  center_image_path = str(QR_LOGO_PATH) if QR_LOGO_PATH.exists() else None
+  if center_image_path:
     print(f"[PDF Generation] Logo image found: {QR_LOGO_PATH} (size: {QR_LOGO_PATH.stat().st_size} bytes)")
   else:
     print(f"[PDF Generation] WARNING: Logo image not found at {QR_LOGO_PATH}. QR codes will be generated without center logo.")
-  
-  images: List[Dict[str, Any]] = []
-  for record_id in ids:
-    url = _build_qr_url(front_domain, record_id)
-    img = _generate_qr_image(url)
-    # ラベルはパス部分だけにして見栄えを良くする (例: /quick_access/123)
-    label = f"/quick_access/{record_id}"
-    center_image_path = str(QR_LOGO_PATH) if QR_LOGO_PATH.exists() else None
-    images.append(
-        {
-            "image": img,
-            "label": label,
-            "center_image": center_image_path,
-        }
-    )
 
   # 一時ファイルに PDF を出力
   with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", prefix=f"{table}_qr_") as tmp_file:
     output_path = Path(tmp_file.name)
 
-  print(f"[PDF Generation] Creating PDF layout with {len(images)} QR codes")
-  _layout_qrs_to_pdf(images, output_path)
+  print(f"[PDF Generation] Creating PDF layout with {len(ids)} QR codes (streaming mode)")
+  
+  # ストリーミング処理：QRコードを1つずつ生成してPDFに描画
+  _layout_qrs_to_pdf_streaming(ids, front_domain, center_image_path, output_path)
+  
   print(f"[PDF Generation] PDF layout completed: {output_path}")
   return output_path
 
