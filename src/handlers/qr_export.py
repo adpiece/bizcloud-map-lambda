@@ -68,11 +68,11 @@ def _fetch_ids(table: str, record_ids: List[int]) -> List[int]:
 def _build_qr_url(front_domain: str, record_id: int) -> str:
   """
   QR に埋め込む URL を生成する。
-  例) https://example.com/quick_access/123
+  例) https://example.com/quick-access/123
   """
 
   base = front_domain.rstrip("/")
-  return f"{base}/quick_access/{record_id}"
+  return f"{base}/quick-access/{record_id}"
 
 
 def _generate_qr_image(data: str):
