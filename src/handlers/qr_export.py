@@ -143,7 +143,7 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
     # QRコードを生成
     url = _build_qr_url(front_domain, record_id)
     img = _generate_qr_image(url)
-    label = f"/quick_access/{record_id}"
+    label = f"record_id: {record_id}"
 
     x = margin_x + col * cell_width
     y = page_height - margin_y - (row + 1) * cell_height + label_height
