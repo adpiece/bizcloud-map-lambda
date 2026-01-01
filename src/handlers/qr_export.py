@@ -313,14 +313,64 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
 
     # ラベルを描画（20mm × 20mmのシール内、QRコードの下、中央揃え）
     if label is not None:
+      label_text = str(label)
+      
+      # 25文字以上の場合、24文字まで表示して"..."を追加
+      if len(label_text) > 24:
+        label_text = label_text[:24] + "..."
+      
       c.setFont("Helvetica", 6)  # フォントサイズを小さく（6pt）
-      # テキストの幅を取得して中央揃え
-      text_width = c.stringWidth(str(label), "Helvetica", 6)
-      label_x = sticker_x + (sticker_size - text_width) / 2  # シールの中央に配置
-      # 品番をシールの下部に配置（シールの下端から少し上に）
-      label_y = sticker_y_bottom + 1.0 * MM_TO_PT  # シールの下端から1mm上に配置
-      c.drawString(label_x, label_y, str(label))
-      print(f"[PDF Layout] Label drawn: '{label}' at (x={label_x:.2f}, y={label_y:.2f})")
+      font_size = 6
+      
+      # テキストの幅を取得
+      text_width = c.stringWidth(label_text, "Helvetica", font_size)
+      max_text_width = sticker_size - 2.0 * MM_TO_PT  # シール幅から左右のマージン（各1mm）を引く
+      
+      # テキストが1行で収まる場合
+      if text_width <= max_text_width:
+        label_x = sticker_x + (sticker_size - text_width) / 2  # シールの中央に配置
+        label_y = sticker_y_bottom + 1.0 * MM_TO_PT  # シールの下端から1mm上に配置
+        c.drawString(label_x, label_y, label_text)
+        print(f"[PDF Layout] Label drawn (1 line): '{label_text}' at (x={label_x:.2f}, y={label_y:.2f})")
+      else:
+        # テキストが1行で収まらない場合は2行に分割
+        # テキストを適切な位置で分割（できるだけ中央で分割）
+        mid_point = len(label_text) // 2
+        # スペースやハイフンなどの区切り文字を探す（前後5文字以内）
+        split_pos = mid_point
+        for i in range(max(1, mid_point - 5), min(len(label_text) - 1, mid_point + 5)):
+          if label_text[i] in [' ', '-', '_', '.']:
+            split_pos = i + 1
+            break
+        
+        line1 = label_text[:split_pos].strip()
+        line2 = label_text[split_pos:].strip()
+        
+        # 2行目の幅もチェックして、はみ出る場合はさらに調整
+        line2_width = c.stringWidth(line2, "Helvetica", font_size)
+        if line2_width > max_text_width:
+          # 2行目が長すぎる場合は切り詰める
+          while line2_width > max_text_width and len(line2) > 1:
+            line2 = line2[:-1]
+            line2_width = c.stringWidth(line2, "Helvetica", font_size)
+          line2 = line2 + "..."
+        
+        # 2行のテキストを描画
+        line_height = font_size * 1.2  # 行間を考慮
+        label_y_bottom = sticker_y_bottom + 1.0 * MM_TO_PT  # シールの下端から1mm上に配置（2行目の位置）
+        label_y_top = label_y_bottom + line_height  # 1行目の位置
+        
+        # 1行目を描画
+        line1_width = c.stringWidth(line1, "Helvetica", font_size)
+        line1_x = sticker_x + (sticker_size - line1_width) / 2
+        c.drawString(line1_x, label_y_top, line1)
+        
+        # 2行目を描画
+        line2_width = c.stringWidth(line2, "Helvetica", font_size)
+        line2_x = sticker_x + (sticker_size - line2_width) / 2
+        c.drawString(line2_x, label_y_bottom, line2)
+        
+        print(f"[PDF Layout] Label drawn (2 lines): '{line1}' / '{line2}' at y={label_y_top:.2f}, {label_y_bottom:.2f}")
 
     # 次の位置へ（横方向に進み、端に来たら次の行へ）
     col += 1
