@@ -17,7 +17,7 @@ def main() -> None:
 
   default_payload = {
       "file_type": "products",
-      "record_ids": [1, 2, 3],
+      "record_ids": [10, 11, 12],
       "exported_file_id": 1,
   }
 
