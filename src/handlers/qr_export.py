@@ -4,7 +4,7 @@ import tempfile
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 import boto3
 import qrcode
@@ -42,7 +42,6 @@ else:
         QR_LOGO_PATH = Path(_default_logo_paths[0])
 
 QR_LOGO_RATIO = float(os.getenv("QR_LOGO_RATIO", "0.25"))
-QR_COLS_PER_ROW = int(os.getenv("QR_COLS_PER_ROW", "4"))
 QR_BOX_SIZE = int(os.getenv("QR_BOX_SIZE", "16"))  # QRコードの解像度（大きいほど鮮明、メモリ消費も増加）
 QR_SCALE_FACTOR = float(os.getenv("QR_SCALE_FACTOR", "2.0"))  # PDF描画時のスケールファクター（大きいほど鮮明、メモリ消費も増加）
 
@@ -392,125 +391,6 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
         print(f"[PDF Layout] Cleaned up temporary logo file: {logo_path}")
     except Exception as e:
       print(f"[PDF Layout] WARNING: Failed to cleanup logo temp file {logo_path}: {str(e)}")
-
-
-def _layout_qrs_to_pdf(image_data: Iterable[Dict[str, Any]], output_path: Path) -> None:
-  """
-  QR 画像を A4 PDF にレイアウトして保存する。
-
-  環境変数 QR_COLS_PER_ROW で1行あたりのQR数を指定可能（4, 5, 6のいずれか）。
-  デフォルトは4。
-  """
-
-  page_width, page_height = A4
-  margin_x = 40
-  margin_y = 40
-
-  cols = QR_COLS_PER_ROW
-  if cols not in {4, 5, 6, 7, 8}:
-    cols = 4  # 無効な値の場合はデフォルトに戻す
-
-  cell_width = (page_width - margin_x * 2) / cols
-  # QR の下にラベルを置くため、1 セルの高さを「QR + ラベル余白」として少し大きめに確保
-  label_height = 16
-  cell_height = cell_width + label_height
-
-  c = canvas.Canvas(str(output_path), pagesize=A4)
-
-  col = 0
-  row = 0
-  logo_cache: Dict[str, ImageReader] = {}
-  
-  # image_dataをリストに変換して、長さを取得できるようにする
-  image_list = list(image_data)
-  total_items = len(image_list)
-  print(f"[PDF Layout] Starting PDF layout with {total_items} QR codes")
-  item_count = 0
-
-  for item in image_list:
-    item_count += 1
-    print(f"[PDF Layout] Processing item {item_count}/{total_items} (row={row}, col={col})")
-    img = item["image"]
-    label = item.get("label")
-    center_image = item.get("center_image")
-
-    x = margin_x + col * cell_width
-    # reportlab は左下が原点なので、上から下へ配置するように座標計算
-    # セルの中で上側に QR、下側にラベルが来るようにオフセット
-    y = page_height - margin_y - (row + 1) * cell_height + label_height
-
-    # PIL.Image を一度一時ファイルに保存し、それを貼り付け
-    # 高解像度で描画するため、スケールファクターを適用してリサイズ
-    print(f"[PDF Layout] Saving QR image to temporary file...")
-    tmp_path = output_path.parent / f"._qr_tmp_{row}_{col}.png"
-    # 高品質なリサンプリング（LANCZOS）を使用してリサイズ
-    scaled_size = int(cell_width * QR_SCALE_FACTOR)
-    # Pillowのバージョン互換性を考慮
-    try:
-        resample = Image.Resampling.LANCZOS
-    except AttributeError:
-        resample = Image.LANCZOS
-    resized_img = img.resize((scaled_size, scaled_size), resample)
-    # PNG形式で高品質保存
-    resized_img.save(tmp_path, "PNG", optimize=False)
-    print(f"[PDF Layout] Drawing QR image on PDF (scaled size: {scaled_size}x{scaled_size})...")
-    # 高解像度の画像をPDFに描画（実際の表示サイズはcell_width）
-    c.drawImage(str(tmp_path), x, y, width=cell_width, height=cell_width)
-    tmp_path.unlink(missing_ok=True)
-    print(f"[PDF Layout] QR image drawn successfully")
-
-    if center_image:
-      try:
-        if center_image not in logo_cache:
-          print(f"[PDF Layout] Loading logo image: {center_image}")
-          print(f"[PDF Layout] Creating ImageReader for logo...")
-          logo_cache[center_image] = ImageReader(center_image)
-          print(f"[PDF Layout] ImageReader created successfully")
-        reader = logo_cache[center_image]
-        print(f"[PDF Layout] Getting logo image size...")
-        img_w, img_h = reader.getSize()
-        print(f"[PDF Layout] Logo image size: {img_w}x{img_h}")
-      except Exception as e:
-        print(f"[PDF Layout] WARNING: Failed to load logo image {center_image}: {str(e)}")
-        print(f"[PDF Layout] Traceback: {traceback.format_exc()}")
-        reader = None
-        img_w = img_h = 0
-
-      if reader and img_w > 0:
-        print(f"[PDF Layout] Drawing logo on PDF...")
-        logo_width = cell_width * QR_LOGO_RATIO
-        aspect = img_h / img_w
-        logo_height = logo_width * aspect
-        logo_x = x + (cell_width - logo_width) / 2
-        logo_y = y + (cell_width - logo_height) / 2
-        print(f"[PDF Layout] Logo position: x={logo_x}, y={logo_y}, width={logo_width}, height={logo_height}")
-        c.drawImage(reader, logo_x, logo_y, width=logo_width, height=logo_height, mask="auto")
-        print(f"[PDF Layout] Logo drawn successfully")
-        c.setStrokeColorRGB(0, 0, 0)
-        c.setLineWidth(0.5)
-        c.rect(logo_x, logo_y, logo_width, logo_height, fill=0, stroke=1)
-      elif center_image:
-        print(f"[PDF Layout] WARNING: Logo image {center_image} could not be loaded (reader={reader}, size={img_w}x{img_h})")
-
-    if label is not None:
-      c.setFont("Helvetica", 8)
-      # 中央揃えで QR のすぐ下に文字列を描画
-      c.drawCentredString(x + cell_width / 2, y - 4, str(label))
-
-    col += 1
-    if col >= cols:
-      col = 0
-      row += 1
-      if margin_y + (row + 1) * cell_height > page_height - margin_y:
-        print(f"[PDF Layout] Starting new page (row={row})")
-        c.showPage()
-        row = 0
-    
-    print(f"[PDF Layout] Completed processing item {item_count}")
-
-  print(f"[PDF Layout] All items processed. Saving PDF to {output_path}...")
-  c.save()
-  print(f"[PDF Layout] PDF saved successfully. File size: {output_path.stat().st_size} bytes")
 
 
 # --------------------------------------------------------------------------- #
