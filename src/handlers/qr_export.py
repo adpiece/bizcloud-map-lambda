@@ -65,6 +65,34 @@ def _fetch_ids(table: str, record_ids: List[int]) -> List[int]:
       return [row[0] for row in cursor.fetchall()]
 
 
+def _fetch_product_codes(record_ids: List[int]) -> Dict[int, str]:
+  """
+  productsテーブルからrecord_idとproduct_codeのマッピングを取得する。
+  
+  Parameters
+  ----------
+  record_ids: List[int]
+      対象レコード ID のリスト
+  
+  Returns
+  -------
+  Dict[int, str]
+      record_idをキー、product_codeを値とする辞書
+  """
+  
+  if not record_ids:
+    return {}
+  
+  placeholders = ",".join(["%s"] * len(record_ids))
+  query = f"SELECT id, product_code FROM products WHERE id IN ({placeholders})"
+  params: List[Any] = record_ids
+  
+  with get_connection(timeout=5) as conn:
+    with conn.cursor() as cursor:
+      cursor.execute(query, params)
+      return {row[0]: row[1] for row in cursor.fetchall()}
+
+
 def _build_qr_url(front_domain: str, record_id: int) -> str:
   """
   QR に埋め込む URL を生成する。
@@ -92,10 +120,18 @@ def _generate_qr_image(data: str):
   return qr.make_image(fill_color="black", back_color="white").convert("RGBA")
 
 
-def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, center_image_path: Optional[str], output_path: Path) -> None:
+def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, center_image_path: Optional[str], output_path: Path, product_codes: Optional[Dict[int, str]] = None) -> None:
   """
   QRコードを1つずつ生成してPDFに描画するストリーミング処理。
   メモリに全ての画像を保持せず、1つずつ処理してPDFに書き込む。
+  
+  シールプリント用フォーマット:
+  - 用紙サイズ: 縦297mm × 横210mm (A4縦向き)
+  - 上部空間: 30.5mm
+  - 左部空間: 23mm
+  - QR配置する四角: 20mm × 20mm
+  - 四角の隙間: 上下左右4mm
+  - 横一列に7つ、それが10列（縦方向に10行）= 1ページに70個
   
   Parameters
   ----------
@@ -107,52 +143,99 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
       ロゴ画像のパス（Noneの場合はロゴなし）
   output_path: Path
       出力PDFのパス
+  product_codes: Optional[Dict[int, str]]
+      record_idをキー、product_codeを値とする辞書（Noneの場合はrecord_idを表示）
   """
-  page_width, page_height = A4
-  margin_x = 40
-  margin_y = 40
-
-  cols = QR_COLS_PER_ROW
-  if cols not in {4, 5, 6, 7, 8}:
-    cols = 4
-
-  cell_width = (page_width - margin_x * 2) / cols
-  label_height = 16
-  cell_height = cell_width + label_height
+  # シールプリント用フォーマットの設定（mmからポイントへ変換: 1mm = 2.83465pt）
+  MM_TO_PT = 2.83465
+  
+  # 用紙サイズ（A4縦向き: 210mm × 297mm）
+  page_width, page_height = A4  # 595.28pt × 841.89pt
+  
+  # マージン設定
+  top_margin = 30.5 * MM_TO_PT  # 30.5mm = 86.46pt
+  left_margin = 23.0 * MM_TO_PT  # 23mm = 65.20pt
+  
+  # シールサイズ: 20mm × 20mmの正方形
+  sticker_size = 20.0 * MM_TO_PT  # 20mm = 56.69pt
+  gap = 4.0 * MM_TO_PT  # シール間の隙間: 4mm = 11.34pt
+  
+  # QRコードのサイズ（20mm × 20mmのシールの中にQRコードと品番を収めるため、QRコードを少し小さく）
+  # QRコードを15mm × 15mm、品番を下に5mm程度のスペースに配置
+  qr_size = 15.0 * MM_TO_PT  # 15mm = 42.52pt
+  label_height = 4.0 * MM_TO_PT  # 品番用のスペース: 約4mm = 11.34pt
+  qr_label_spacing = 1.0 * MM_TO_PT  # QRコードと品番の間隔: 1mm = 2.83pt
+  
+  # レイアウト設定（横7個 × 縦10行 = 1ページに70個）
+  cols_per_page = 7  # 横方向に7つ
+  rows_per_page = 10  # 縦方向に10行
+  
+  # シール間の間隔（シールサイズ + 隙間）
+  sticker_spacing_x = sticker_size + gap  # 横方向: シール + 右の隙間
+  sticker_spacing_y = sticker_size + gap  # 縦方向: シール + 下の隙間
 
   # ロゴ画像の最大サイズを計算（メモリ削減のため、適切なサイズにリサイズ）
-  # ロゴは cell_width * QR_LOGO_RATIO のサイズで表示されるので、余裕を持たせて3倍程度にリサイズ
-  max_logo_size = int(cell_width * QR_LOGO_RATIO * 3)
+  # ロゴは qr_size * QR_LOGO_RATIO のサイズで表示されるので、余裕を持たせて3倍程度にリサイズ
+  max_logo_size = int(qr_size * QR_LOGO_RATIO * 3)
+  print(f"[PDF Layout] Sticker format: Sticker size={sticker_size:.2f}pt ({20.0}mm), QR size={qr_size:.2f}pt ({qr_size/MM_TO_PT:.1f}mm), gap={gap:.2f}pt ({4.0}mm)")
+  print(f"[PDF Layout] Layout: {cols_per_page} columns × {rows_per_page} rows = {cols_per_page * rows_per_page} stickers per page")
   print(f"[PDF Layout] Max logo size for memory optimization: {max_logo_size}px")
 
   c = canvas.Canvas(str(output_path), pagesize=A4)
 
   col = 0
   row = 0
+  page_num = 1
   logo_cache: Dict[str, ImageReader] = {}
   logo_tmp_files: Dict[str, Path] = {}  # クリーンアップ用の一時ファイルパス
   
   total_items = len(record_ids)
-  print(f"[PDF Layout] Starting PDF layout with {total_items} QR codes (streaming mode)")
+  print(f"[PDF Layout] Starting PDF layout with {total_items} QR codes (streaming mode, sticker format)")
   item_count = 0
 
   for record_id in record_ids:
+    # 新しいページが必要な場合（1ページに70個まで）
+    if row >= rows_per_page:
+      print(f"[PDF Layout] Starting new page (page {page_num + 1})")
+      c.showPage()
+      row = 0
+      col = 0
+      page_num += 1
+    
     item_count += 1
-    print(f"[PDF Layout] Processing item {item_count}/{total_items} (row={row}, col={col})")
+    print(f"[PDF Layout] Processing item {item_count}/{total_items} (page={page_num}, row={row}, col={col})")
     
     # QRコードを生成
     url = _build_qr_url(front_domain, record_id)
     img = _generate_qr_image(url)
-    label = f"record_id: {record_id}"
+    # 品番がある場合は品番を、ない場合はrecord_idを表示
+    if product_codes and record_id in product_codes:
+      label = product_codes[record_id]
+    else:
+      label = f"record_id: {record_id}"
 
-    x = margin_x + col * cell_width
-    y = page_height - margin_y - (row + 1) * cell_height + label_height
+    # 配置位置の計算（ReportLabは左下が原点）
+    # 20mm × 20mmのシールの左下位置
+    sticker_x = left_margin + (col * sticker_spacing_x)
+    sticker_y_bottom = page_height - top_margin - (row * sticker_spacing_y) - sticker_size  # シールの下端
+    sticker_y_top = sticker_y_bottom + sticker_size  # シールの上端
+    
+    # 確認用: 20mm × 20mmのシールに枠線を描画
+    c.setStrokeColorRGB(1, 0, 0)  # 赤色の枠線（確認用）
+    c.setLineWidth(0.5)
+    c.rect(sticker_x, sticker_y_bottom, sticker_size, sticker_size, fill=0, stroke=1)
+    
+    # QRコードの配置位置（シールの上部中央）
+    # QRコードの下端Y = シールの上端からQRサイズ分下げる
+    x = sticker_x + (sticker_size - qr_size) / 2  # 横方向は中央
+    y = sticker_y_top - qr_size  # 縦方向は上部に配置
 
     # QR画像を一時ファイルに保存してPDFに貼り付け
     print(f"[PDF Layout] Saving QR image to temporary file...")
-    tmp_path = output_path.parent / f"._qr_tmp_{row}_{col}.png"
+    tmp_path = output_path.parent / f"._qr_tmp_{page_num}_{row}_{col}.png"
     # 高品質なリサンプリング（LANCZOS）を使用してリサイズ
-    scaled_size = int(cell_width * QR_SCALE_FACTOR)
+    # QRコードのサイズを20mmに固定（ピクセル単位に変換してからリサイズ）
+    scaled_size = int(qr_size * QR_SCALE_FACTOR)
     # Pillowのバージョン互換性を考慮
     try:
         resample = Image.Resampling.LANCZOS
@@ -161,8 +244,8 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
     resized_img = img.resize((scaled_size, scaled_size), resample)
     # PNG形式で高品質保存
     resized_img.save(tmp_path, "PNG", optimize=False)
-    print(f"[PDF Layout] Drawing QR image on PDF (scaled size: {scaled_size}x{scaled_size})...")
-    c.drawImage(str(tmp_path), x, y, width=cell_width, height=cell_width)
+    print(f"[PDF Layout] Drawing QR image on PDF (position: x={x:.2f}, y={y:.2f}, size={qr_size:.2f}pt)...")
+    c.drawImage(str(tmp_path), x, y, width=qr_size, height=qr_size)
     tmp_path.unlink(missing_ok=True)
     # 画像オブジェクトを明示的に削除してメモリを解放
     del img
@@ -214,11 +297,11 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
 
       if reader and img_w > 0:
         print(f"[PDF Layout] Drawing logo on PDF...")
-        logo_width = cell_width * QR_LOGO_RATIO
+        logo_width = qr_size * QR_LOGO_RATIO
         aspect = img_h / img_w
         logo_height = logo_width * aspect
-        logo_x = x + (cell_width - logo_width) / 2
-        logo_y = y + (cell_width - logo_height) / 2
+        logo_x = x + (qr_size - logo_width) / 2
+        logo_y = y + (qr_size - logo_height) / 2
         print(f"[PDF Layout] Logo position: x={logo_x}, y={logo_y}, width={logo_width}, height={logo_height}")
         c.drawImage(reader, logo_x, logo_y, width=logo_width, height=logo_height, mask="auto")
         print(f"[PDF Layout] Logo drawn successfully")
@@ -228,19 +311,22 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
       elif center_image_path:
         print(f"[PDF Layout] WARNING: Logo image {center_image_path} could not be loaded (reader={reader}, size={img_w}x{img_h})")
 
-    # ラベルを描画
+    # ラベルを描画（20mm × 20mmのシール内、QRコードの下、中央揃え）
     if label is not None:
-      c.setFont("Helvetica", 8)
-      c.drawCentredString(x + cell_width / 2, y - 4, str(label))
+      c.setFont("Helvetica", 6)  # フォントサイズを小さく（6pt）
+      # テキストの幅を取得して中央揃え
+      text_width = c.stringWidth(str(label), "Helvetica", 6)
+      label_x = sticker_x + (sticker_size - text_width) / 2  # シールの中央に配置
+      # 品番をシールの下部に配置（シールの下端から少し上に）
+      label_y = sticker_y_bottom + 1.0 * MM_TO_PT  # シールの下端から1mm上に配置
+      c.drawString(label_x, label_y, str(label))
+      print(f"[PDF Layout] Label drawn: '{label}' at (x={label_x:.2f}, y={label_y:.2f})")
 
+    # 次の位置へ（横方向に進み、端に来たら次の行へ）
     col += 1
-    if col >= cols:
+    if col >= cols_per_page:
       col = 0
       row += 1
-      if margin_y + (row + 1) * cell_height > page_height - margin_y:
-        print(f"[PDF Layout] Starting new page (row={row})")
-        c.showPage()
-        row = 0
     
     print(f"[PDF Layout] Completed processing item {item_count}")
 
@@ -493,6 +579,13 @@ def generate_qr_pdf(table: str, record_ids: List[int]) -> Path:
   if not ids:
     raise ValueError("QR を作成する対象レコードが存在しません。")
 
+  # productsテーブルの場合は品番を取得
+  product_codes = None
+  if table == "products":
+    print(f"[PDF Generation] Fetching product codes for {len(ids)} records")
+    product_codes = _fetch_product_codes(ids)
+    print(f"[PDF Generation] Fetched {len(product_codes)} product codes")
+
   # ロゴパスの確認とログ出力
   center_image_path = str(QR_LOGO_PATH) if QR_LOGO_PATH.exists() else None
   if center_image_path:
@@ -507,7 +600,7 @@ def generate_qr_pdf(table: str, record_ids: List[int]) -> Path:
   print(f"[PDF Generation] Creating PDF layout with {len(ids)} QR codes (streaming mode)")
   
   # ストリーミング処理：QRコードを1つずつ生成してPDFに描画
-  _layout_qrs_to_pdf_streaming(ids, front_domain, center_image_path, output_path)
+  _layout_qrs_to_pdf_streaming(ids, front_domain, center_image_path, output_path, product_codes)
   
   print(f"[PDF Generation] PDF layout completed: {output_path}")
   return output_path
