@@ -118,16 +118,20 @@ def _to_csv(table: str, rows: Iterable[Dict[str, Any]]) -> str:
 
 
 def _upload_to_s3(csv_content: str, bucket: str, key: str) -> None:
+  # UTF-8 BOMを追加してWindowsのExcelで正しく開けるようにする
+  utf8_bom = b'\xef\xbb\xbf'
+  csv_bytes = utf8_bom + csv_content.encode("utf-8")
+  
   if USE_LOCAL_S3:
     destination = LOCAL_S3_DIR / bucket / key
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(csv_content, encoding="utf-8")
+    destination.write_bytes(csv_bytes)
     return
 
   S3_CLIENT.put_object(
       Bucket=bucket,
       Key=key,
-      Body=csv_content.encode("utf-8"),
+      Body=csv_bytes,
       ContentType="text/csv; charset=utf-8",
   )
 
