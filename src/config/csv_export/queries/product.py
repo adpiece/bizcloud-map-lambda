@@ -25,10 +25,14 @@ def build_query(record_ids: List[int]) -> Tuple[str, List[Any]]:
     # headers.pyで指定されているフィールドのみを取得
     query = """
         SELECT 
+            p.id,
             c.name AS category_name,
             p.product_name,
             p.product_code,
             m.name AS manufacturer_name,
+            p.list_price,
+            p.purchase_price,
+            p.selling_price,
             p.updated_at
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
