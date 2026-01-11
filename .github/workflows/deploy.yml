@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - main
 
 jobs:
   deploy:
@@ -52,16 +53,34 @@ jobs:
           cd build
           zip -r ../lambda_package.zip .
 
-      - name: Deploy CSV Export Lambda
+      - name: Deploy CSV Export Lambda (Staging)
+        if: github.ref == 'refs/heads/develop'
         run: |
           aws lambda update-function-code \
             --function-name StgBizCloudMapCsvExport \
             --zip-file fileb://lambda_package.zip \
             --publish
 
-      - name: Deploy QR Export Lambda
+      - name: Deploy QR Export Lambda (Staging)
+        if: github.ref == 'refs/heads/develop'
         run: |
           aws lambda update-function-code \
             --function-name StgBizCloudMapQrExport \
+            --zip-file fileb://lambda_package.zip \
+            --publish
+
+      - name: Deploy CSV Export Lambda (Production)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          aws lambda update-function-code \
+            --function-name PrdBizCloudMapCsvExport \
+            --zip-file fileb://lambda_package.zip \
+            --publish
+
+      - name: Deploy QR Export Lambda (Production)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          aws lambda update-function-code \
+            --function-name PrdBizCloudMapQrExport \
             --zip-file fileb://lambda_package.zip \
             --publish

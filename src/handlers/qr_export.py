@@ -152,7 +152,7 @@ def _layout_qrs_to_pdf_streaming(record_ids: List[int], front_domain: str, cente
   page_width, page_height = A4  # 595.28pt × 841.89pt
   
   # マージン設定
-  top_margin = 32 * MM_TO_PT  # 30.5mm = 86.46pt
+  top_margin = 30.5 * MM_TO_PT  # 30.5mm = 86.46pt
   left_margin = 23.0 * MM_TO_PT  # 23mm = 65.20pt
   
   # シールサイズ: 20mm × 20mmの正方形
