@@ -11,6 +11,8 @@ from .users import build_query as build_users_query, transform_row as transform_
 from .product import build_query as build_product_query, transform_row as transform_product_row
 from .categories import build_query as build_categories_query, transform_row as transform_categories_row
 from .manufacturers import build_query as build_manufacturers_query, transform_row as transform_manufacturers_row
+from .locations import build_query as build_locations_query, transform_row as transform_locations_row
+from .supplies import build_query as build_supplies_query, transform_row as transform_supplies_row
 
 # file_type -> (build_query関数, transform_row関数) のマッピング
 QUERY_BUILDERS: Dict[str, Tuple[Callable[[List[int]], Tuple[str, List[Any]]], Callable[[Dict[str, Any]], Dict[str, Any]]]] = {
@@ -18,6 +20,8 @@ QUERY_BUILDERS: Dict[str, Tuple[Callable[[List[int]], Tuple[str, List[Any]]], Ca
     "products": (build_product_query, transform_product_row),
     "categories": (build_categories_query, transform_categories_row),
     "manufacturers": (build_manufacturers_query, transform_manufacturers_row),
+    "locations": (build_locations_query, transform_locations_row),
+    "supplies": (build_supplies_query, transform_supplies_row),
 }
 
 
