@@ -83,6 +83,38 @@ TABLE_EXPORT_CONFIG: Dict[str, TableConfig] = {
             "updated_at": "更新日時",
         },
     },
+    "locations": {
+        "field_order": [
+            "name",
+            "code",
+            "status",
+            "updated_at",
+        ],
+        "labels": {
+            "name": "保管場所名",
+            "code": "コード",
+            "status": "ステータス",
+            "updated_at": "更新日時",
+        },
+    },
+    "supplies": {
+        "field_order": [
+            "category_name",
+            "supply_name",
+            "supply_code",
+            "manufacturer_name",
+            "location_name",
+            "updated_at",
+        ],
+        "labels": {
+            "category_name": "カテゴリ",
+            "supply_name": "品名",
+            "supply_code": "品番",
+            "manufacturer_name": "メーカー",
+            "location_name": "保管場所",
+            "updated_at": "更新日時",
+        },
+    },
     # 他のテーブルを追加したい場合はここに追記してください。
 }
 
